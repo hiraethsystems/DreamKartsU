@@ -448,8 +448,9 @@ At tags `m3`, `m5`, `m6`, `m7`:
   the network.
 - ~~Console retest (2026-11-06)~~: water, stutter and power-ups all look
   right on build 7 (Aisling, 2026-11-07); races hold 60 fps.
-- **Rumble (2026-11-07):** build 7 had none on the GamePad (Aisling). Does
-  the newest build rumble on bumps, jumps and walls? Pro Controller and
+- **Rumble (2026-11-07):** none on the GamePad in builds 7, 17 and the
+  build 18 rumble test, though the console accepts every call. Does this
+  GamePad rumble in a retail game (e.g. Mario Kart 8)? Pro Controller and
   Wii Remote rumble are still untried. ~~Sound~~: works (Aisling,
   2026-11-07). Sheet: `TESTING.md` m4.
 - **M3 hardware test (2026-11-04):** the m3 builds are ready to try on
@@ -842,7 +843,10 @@ At tags `m3`, `m5`, `m6`, `m7`:
   now read once a frame (`plat_pad`). Whether that was the cause is not
   known. `VARIANT=rumbletest` tries four ways of driving the motor, method
   N buzzing N times, from 10 s after boot (log lines `DKU PROBE`).
-  **Needs Aisling:** which buzzes are felt.
+  Build 18 rumbletest on the console: every call returned 0, and Aisling
+  felt **nothing from any of the four**. So the motor ignores accepted
+  calls whatever the pattern, buffer or rate. **Needs Aisling:** does this
+  GamePad rumble in a retail game (e.g. Mario Kart 8, bumping a kart)?
 - 2026-11-07: The Wii U Menu started an old build (Aisling): `run` and
   `dev` never kept the build on the card. Sending the release build now
   also replaces the Menu's copy, skipped when the card already has it
