@@ -142,6 +142,9 @@ try:
     r = tool("install", str(payload))
     check("install replaces the old file", r.returncode == 0 and installed.read_bytes() == payload.read_bytes(), r.stderr)
     check("install leaves no partial file", not list(sd.rglob("*.part")))
+    r = tool("install", str(payload))
+    check("install skips a build the card already has", r.returncode == 0 and "already this build" in r.stdout,
+          r.stdout + r.stderr)
 
     r = tool("status")
     check("status sees FTP and the app", r.returncode == 0 and "DreamKartsU.wuhb" in r.stdout, r.stdout + r.stderr)
@@ -158,6 +161,19 @@ try:
     time.sleep(0.5)
     check("run sends with the real wiiload tool", r.returncode == 0 and received[:4] == b"HAXX" and len(received) > 1000,
           r.stderr or bytes(received[:16]))
+
+    check("run of a test build leaves the Menu copy alone", installed.read_bytes() == payload.read_bytes())
+
+    release = ROOT / "build/wiiu-gx2-release/DreamKartsU.wuhb"
+    if release.is_file():
+        received.clear()
+        r = tool("run")
+        time.sleep(0.5)
+        check("run of the release build updates the Menu copy",
+              r.returncode == 0 and installed.read_bytes() == release.read_bytes() and len(received) > 1000,
+              r.stdout + r.stderr)
+    else:
+        print("SKIP run of the release build (none built)")
 
     check("nothing opened an empty connection to Wiiload", empty_connections == 0, f"{empty_connections} of them")
 

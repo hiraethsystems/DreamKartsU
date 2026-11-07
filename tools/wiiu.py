@@ -8,8 +8,8 @@ app, TCP 4299), FTPiiU (the SD card, port 21) and the game's own UDP log
   tools/wiiu.py find                 look for the console on the local network
   tools/wiiu.py set-ip 192.168.1.50  remember its address
   tools/wiiu.py status               what is reachable
-  tools/wiiu.py dev                  build, send, start, then show the live log
-  tools/wiiu.py run [FILE]           send a .wuhb and start it (not kept on the card)
+  tools/wiiu.py dev                  build, update the Menu copy, send, start, show the live log
+  tools/wiiu.py run [FILE]           send a .wuhb and start it (the release build also updates the Menu copy)
   tools/wiiu.py install [FILE]       put a .wuhb on the card for the Wii U Menu
   tools/wiiu.py log [--for S] [--until REGEX]   live log, also saved in logs/
   tools/wiiu.py pull-log [--all]     copy this build's log file (or all) to logs/console/
@@ -28,6 +28,8 @@ the git-ignored file .wiiu-console. Only ever talks to that address.
 import argparse
 import concurrent.futures
 import ftplib
+import hashlib
+import io
 import ipaddress
 import os
 import posixpath
@@ -215,10 +217,32 @@ def download(f, remote, local):
     print(f"{remote} -> {local.relative_to(ROOT) if local.is_relative_to(ROOT) else local} ({local.stat().st_size} bytes)")
 
 
-def cmd_install(args):
+MENU_COPY = f"{APP_DIR}/DreamKartsU.wuhb"
+MENU_SUM = MENU_COPY + ".sha256"   # what the card's copy is, so an unchanged build is not sent twice
+
+
+def install(path):
+    """Put the build where the Wii U Menu starts it, unless it is there."""
+    data = Path(path).read_bytes() if Path(path).is_file() else None
+    if data is None:
+        die(f"no such file: {path}")
+    want = hashlib.sha256(data).hexdigest()
     with ftp_connect() as f:
-        upload(f, args.file, f"{APP_DIR}/DreamKartsU.wuhb")
-    print("installed: close the game and start it again from the Wii U Menu to use it")
+        have = []
+        if posixpath.basename(MENU_SUM) in sd_names(f, APP_DIR):
+            f.retrbinary(f"RETR {sd_path(MENU_SUM)}", have.append)
+        if b"".join(have).decode(errors="replace").strip() == want and \
+                posixpath.basename(MENU_COPY) in sd_names(f, APP_DIR):
+            print("Wii U Menu copy: already this build")
+            return
+        upload(f, path, MENU_COPY)
+        f.storbinary(f"STOR {sd_path(MENU_SUM)}", io.BytesIO(want.encode() + b"\n"))
+    print("Wii U Menu copy: updated")
+
+
+def cmd_install(args):
+    install(args.file)
+    print("close the game and start it again from the Wii U Menu to use it")
 
 
 def cmd_ls(args):
@@ -325,8 +349,18 @@ def wiiload(ip, file):
     print(f"sent {file.name} ({file.stat().st_size / 1e6:.1f} MB) in {time.monotonic() - t0:.1f} s")
 
 
+def is_release(path):
+    return Path(path).resolve() == DEFAULT_WUHB.resolve()
+
+
 def cmd_run(args):
-    wiiload(console_ip(), args.file)
+    ip = console_ip()
+    # The release build also replaces the Wii U Menu's copy, so the Menu
+    # never starts an old build (Aisling, 2026-11-07). Test builds do not:
+    # they race by themselves or probe hardware.
+    if is_release(args.file):
+        install(args.file)
+    wiiload(ip, args.file)
 
 
 def cmd_dev(args):
@@ -336,6 +370,7 @@ def cmd_dev(args):
     if subprocess.run(cmd, cwd=ROOT, env=env).returncode:
         die("build failed")
     print(f"build {build_number()}")
+    install(DEFAULT_WUHB)   # as cmd_run: the Menu's copy is always the newest release
     live = LiveLog(ip)   # listening before the game starts, for its first lines
     wiiload(ip, DEFAULT_WUHB)
     print(f"live log, saving to {live.path.relative_to(ROOT)}; Ctrl-C ends", file=sys.stderr)

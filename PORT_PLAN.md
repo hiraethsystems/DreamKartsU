@@ -835,3 +835,16 @@ At tags `m3`, `m5`, `m6`, `m7`:
   - Checks, all PASS: `test_native.sh` (8 tracks), `test_host.sh` null and
     GL (null now fails on any bad batch), `test_be.sh`, `test_saves.sh`,
     `test_wiiu.sh` (8 tracks), console autotest builds 10, 11, 12, 17.
+- 2026-11-07: **Rumble still not felt** on release build 17 from the Wii U
+  Menu (Aisling), though every `VPADControlMotor` call returns 0. Found:
+  the shim read each pad several times a frame, so the GamePad was read
+  five times a frame and the motor pattern re-sent every 67 ms; pads are
+  now read once a frame (`plat_pad`). Whether that was the cause is not
+  known. `VARIANT=rumbletest` tries four ways of driving the motor, method
+  N buzzing N times, from 10 s after boot (log lines `DKU PROBE`).
+  **Needs Aisling:** which buzzes are felt.
+- 2026-11-07: The Wii U Menu started an old build (Aisling): `run` and
+  `dev` never kept the build on the card. Sending the release build now
+  also replaces the Menu's copy, skipped when the card already has it
+  (`.sha256` next to it); test builds leave it alone.
+  `test_console_tool.py` PASS with checks for both.

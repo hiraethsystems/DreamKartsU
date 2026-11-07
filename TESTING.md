@@ -37,8 +37,8 @@ the router saves doing this again.
 
 | Command | What it does |
 |---|---|
-| `tools/wiiu.py dev` | Build, send, start, then show the live log |
-| `tools/wiiu.py run` | Send the current build and start it, without keeping it on the card |
+| `tools/wiiu.py dev` | Build, update the Wii U Menu copy, send, start, then show the live log |
+| `tools/wiiu.py run` | Send a build and start it. The release build also replaces the Wii U Menu copy (skipped when the card has it already); test builds leave it alone |
 | `tools/wiiu.py install` | Put the build on the card for the Wii U Menu (close the game first) |
 | `tools/wiiu.py log` | Live log; also saved in `logs/` |
 | `tools/wiiu.py pull-log` | Copy this build's log file to `logs/console/` (`--all` for every build) |

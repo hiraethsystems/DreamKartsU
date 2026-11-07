@@ -300,21 +300,84 @@ static void motor(int i, int power) {
     }
 }
 
+/* Each pad is read once a frame: the shim asks for it several times a
+   frame (every maple_enum_dev), which read the GamePad five times a frame
+   and re-sent the rumble pattern every 4 frames instead of every 20. */
+static uint32_t pad_frame = 1, pad_read[PLAT_PADS];
+static cont_state_t pad_state[PLAT_PADS];
+static bool pad_ok[PLAT_PADS];
+
 bool plat_pad(int i, cont_state_t *out) {
     memset(out, 0, sizeof(*out));
     if(i < 0 || i >= PLAT_PADS) return false;
-    bool ok = i == 0 ? gamepad(out) : remote(i - 1, out);
-    if(ok && rumble_pow[i] > 0 && ++rumble_age[i] >= REFRESH) {
-        rumble_age[i] = 0;
-        if(i == 0) gamepad_motor(rumble_pow[i]);
+    if(pad_read[i] != pad_frame) {
+        pad_read[i] = pad_frame;
+        pad_ok[i] = i == 0 ? gamepad(&pad_state[i]) : remote(i - 1, &pad_state[i]);
     }
-    return ok;
+    *out = pad_state[i];
+    return pad_ok[i];
 }
 
+/* Once a frame, from plat_frame_done. */
+static void rumble_frame(void) {
+    for(int i = 0; i < PLAT_PADS; i++)
+        if(rumble_pow[i] > 0 && ++rumble_age[i] >= REFRESH) {
+            rumble_age[i] = 0;
+            if(i == 0) gamepad_motor(rumble_pow[i]);
+        }
+}
+
+#ifdef DKU_RUMBLE_PROBE
+/* VARIANT=rumbletest: four ways to drive the GamePad motor, told apart by
+   how many buzzes each gives (1 to 4), from 10 s after boot, then again.
+   The game's own rumble is off for the GamePad. Which ones Aisling feels
+   says which way works on the console. */
+static void probe_motor(int method, bool on) {
+    static const uint8_t solid[15] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    static uint8_t aligned[64] __attribute__((aligned(64)));
+    if(!on) {
+        VPADStopMotor(VPAD_CHAN_0);
+        printf("DKU PROBE: method %d off\n", method);
+        return;
+    }
+    memset(aligned, 0xff, sizeof(aligned));
+    int32_t r;
+    switch(method) {
+        case 1: r = VPADControlMotor(VPAD_CHAN_0, solid, 120); break;          /* as the game now */
+        case 2: r = VPADControlMotor(VPAD_CHAN_0, aligned, 120); break;        /* aligned buffer */
+        case 3: r = VPADControlMotor(VPAD_CHAN_0, solid, 120); break;          /* and re-sent each frame */
+        default: r = VPADControlMotor(VPAD_CHAN_0, aligned, 15); break;        /* length in bytes */
+    }
+    printf("DKU PROBE: method %d on -> %d\n", method, (int)r);
+}
+
+static void rumble_probe(void) {
+    static uint32_t f;
+    f++;
+    const uint32_t start = 600, buzz = 36, gap = 30, rest = 180;
+    uint32_t t = f < start ? 0xffffffffu : (f - start);
+    uint32_t round = 0, at = 0;
+    /* Lay out the timeline: methods 1..4, method m buzzes m times. */
+    for(round = 0; round < 2; round++)
+        for(int m = 1; m <= 4; m++) {
+            for(int b = 0; b < m; b++) {
+                if(t == at) probe_motor(m, true);
+                else if(t > at && t < at + buzz && m == 3) probe_motor(m, true);
+                else if(t == at + buzz) probe_motor(m, false);
+                at += buzz + gap;
+            }
+            at += rest;
+        }
+}
+#endif
 bool plat_pad_has_rumble(int i) { return i >= 0 && i < PLAT_PADS; }
 
 void plat_rumble(int i, int power, int freq) {
     (void)freq;
+#ifdef DKU_RUMBLE_PROBE
+    if(i == 0) return;
+#endif
     if(i < 0 || i >= PLAT_PADS || power == rumble_pow[i]) return;
     rumble_pow[i] = power;
     rumble_age[i] = 0;
@@ -376,6 +439,11 @@ void plat_init(void) {
 }
 
 void plat_frame_done(void) {
+    pad_frame++;
+#ifdef DKU_RUMBLE_PROBE
+    rumble_probe();
+#endif
+    rumble_frame();
 #ifdef DKU_EXIT_AFTER_FRAMES
     /* VARIANT=exittest: leave as "Close software" does, for the Cemu check. */
     static int exit_frames;
