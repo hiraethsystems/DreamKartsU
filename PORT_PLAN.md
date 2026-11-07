@@ -448,9 +448,10 @@ At tags `m3`, `m5`, `m6`, `m7`:
   the network.
 - ~~Console retest (2026-11-06)~~: water, stutter and power-ups all look
   right on build 7 (Aisling, 2026-11-07); races hold 60 fps.
-- **Rumble (2026-11-07):** none on the GamePad in builds 7, 17 and the
-  build 18 rumble test, though the console accepts every call. Does this
-  GamePad rumble in a retail game (e.g. Mario Kart 8)? Pro Controller and
+- **Rumble (parked by Aisling, 2026-11-07):** none on the GamePad in builds
+  7, 17 and the build 18 rumble test, though the console accepts every
+  call. Open when it comes back: does this GamePad rumble in a retail game
+  (e.g. Mario Kart 8)? `VARIANT=rumbletest` is ready for the next try. Pro Controller and
   Wii Remote rumble are still untried. ~~Sound~~: works (Aisling,
   2026-11-07). Sheet: `TESTING.md` m4.
 - **M3 hardware test (2026-11-04):** the m3 builds are ready to try on
@@ -852,3 +853,6 @@ At tags `m3`, `m5`, `m6`, `m7`:
   also replaces the Menu's copy, skipped when the card already has it
   (`.sha256` next to it); test builds leave it alone.
   `test_console_tool.py` PASS with checks for both.
+- 2026-11-07: **Rumble parked** (Aisling). The code stays: the console
+  accepts its calls, and pads are read once a frame. Not known whether this
+  GamePad's motor works at all.
