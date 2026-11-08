@@ -15,7 +15,7 @@ TOPDIR ?= $(CURDIR)
 #-------------------------------------------------------------------------------
 APP_NAME	:= DreamKartsU hello
 APP_SHORTNAME	:= DKU hello
-APP_AUTHOR	:= hiraethclub
+APP_AUTHOR	:= Hiraeth Systems
 
 include $(DEVKITPRO)/wut/share/wut_rules
 

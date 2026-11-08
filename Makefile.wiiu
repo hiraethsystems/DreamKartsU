@@ -95,7 +95,7 @@ $(OUT)/content/.stamp: $(OUT)/content/.list $(MUSIC)
 	@touch $@
 
 $(OUT)/DreamKartsU.wuhb: $(OUT)/DreamKartsU.rpx $(WUHB_ART) $(OUT)/content/.stamp
-	wuhbtool $< $@ --name "DreamKartsU" --short-name "DreamKartsU" --author "Rich Stokes, port by hiraethclub" \
+	wuhbtool $< $@ --name "DreamKartsU" --short-name "DreamKartsU" --author "Rich Stokes, port by Hiraeth Systems" \
 		--icon=port/wuhb/icon.png --tv-image=port/wuhb/tv.png --drc-image=port/wuhb/drc.png \
 		--content=$(OUT)/content
 

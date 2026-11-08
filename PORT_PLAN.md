@@ -196,7 +196,7 @@ testing (note that in the progress log and carry on).
 ### M0. Repo and toolchain (supervised, short)
 
 - Switch `LICENSE` to MIT: keep `Copyright (c) 2026 Rich Stokes`, add
-  `Copyright (c) 2026 Aisling (hiraethclub)` for the port. Keep
+  `Copyright (c) 2026 Aisling (Hiraeth Systems)` for the port. Keep
   `CREDITS.md` and its licence notices; add wut, CafeGLSL, SDL2 and any
   other new dependency.
 - Import upstream with `git subtree` (or a plain copy plus SHA in

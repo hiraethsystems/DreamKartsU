@@ -6,7 +6,7 @@ The game itself (code, models, textures, effects) is Rich's; see
 music credits (Alex Morgan, Pixabay Content License) and the licence notices
 of KallistiOS, SH4ZAM and Lilita One, all of which still apply.
 
-Port by Aisling (hiraethclub).
+Port by Aisling (Hiraeth Systems).
 
 ## Port dependencies
 
