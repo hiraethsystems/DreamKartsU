@@ -24,8 +24,8 @@ VARIANT=${VARIANT:-autotest}
 CROSS=${CROSS:-}
 RUN=${RUN:-}
 # Raceable tracks: TRACK_DISABLED in upstream src/track.h leaves out
-# Cyberstone (5) and the Free Roam lot (9).
-TRACKS=${TRACKS:-"0 1 2 3 4 6 7 8"}
+# Cyberstone (5) and the Free Roam lot (9); Bay City Hills is 10.
+TRACKS=${TRACKS:-"0 1 2 3 4 6 7 8 10"}
 # Tracks whose DK XFCHECK counts upstream's own sphere-vs-outcode check
 # failing, not a difference in port/xform_c.c: Temple Hill's bystanders
 # bob by moving their strip vertices (world_props.c bystanders_update)
@@ -39,6 +39,7 @@ mkdir -p "$LOGDIR"
 echo "test_host: backend $BACKEND, variant $VARIANT${CROSS:+, cross $CROSS}, tracks $TRACKS"
 
 for t in $TRACKS; do
+    rm -f "build/${CROSS}host-$BACKEND-$VARIANT$([ "$VARIANT" = xfcheck ] && echo -cpu)-t$t/dreamkartsu"
     if ! make -s -j"$JOBS" BACKEND="$BACKEND" VARIANT="$VARIANT" CROSS="$CROSS" DK_AT_TRACK="$t" \
             >"$LOGDIR/build-t$t.log" 2>&1; then
         cat "$LOGDIR/build-t$t.log"
@@ -49,7 +50,9 @@ done
 
 run_track() {
     t=$1
-    bin=build/${CROSS}host-$BACKEND-$VARIANT-t$t/dreamkartsu
+    # sources.mk: xfcheck always builds the CPU path, in a "-cpu" folder.
+    tag=$([ "$VARIANT" = xfcheck ] && echo -cpu || true)
+    bin=build/${CROSS}host-$BACKEND-$VARIANT$tag-t$t/dreamkartsu
     save=build/test-save-t$t
     rm -rf "$save" && mkdir -p "$save"
     # 60 frames a second of virtual time: a race and its results fit well

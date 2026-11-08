@@ -3,7 +3,7 @@
    C reference beside it in render.c's -DDK_XF_CHECK build, which can run
    against these (tools/test_host.sh XFCHECK=1). Output goes to the
    software TA through pvr_dr_target()/pvr_dr_commit(). */
-#include "render.h"
+#include "engine/render.h"
 #include <sh4zam/shz_sh4zam.h>
 
 /* Must match render.c. */
@@ -39,7 +39,7 @@ static inline unsigned stage_one(float x, float y, float z, float u, float v, ui
     return code;
 }
 
-uint32_t dk_xf_stage(const RV *v, int n, pvr_vertex_t *out, const XfParams *p) {
+uint32_t eng_xf_stage(const RV *v, int n, pvr_vertex_t *out, const XfParams *p) {
     unsigned and_code = 31, or_code = 0;
     for(int i = 0; i < n; i++) {
         unsigned c = stage_one(v[i].x, v[i].y, v[i].z, v[i].u, v[i].v, v[i].c, p, &out[i]);
@@ -50,7 +50,7 @@ uint32_t dk_xf_stage(const RV *v, int n, pvr_vertex_t *out, const XfParams *p) {
     return and_code | or_code << 8;
 }
 
-uint32_t dk_xf_stage_kv(const KV *v, int n, pvr_vertex_t *out, const XfParams *p) {
+uint32_t eng_xf_stage_kv(const KV *v, int n, pvr_vertex_t *out, const XfParams *p) {
     unsigned and_code = 31, or_code = 0;
     for(int i = 0; i < n; i++) {
         unsigned c = stage_one(v[i].x, v[i].y, v[i].z, 0, 0, p->col[v[i].group], p, &out[i]);
@@ -61,11 +61,11 @@ uint32_t dk_xf_stage_kv(const KV *v, int n, pvr_vertex_t *out, const XfParams *p
     return and_code | or_code << 8;
 }
 
-void dk_sq_run(const pvr_vertex_t *src, int n) {
+void eng_sq_run(const pvr_vertex_t *src, int n) {
     for(int i = 0; i < n; i++) send(&src[i], i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX);
 }
 
-void dk_xf_emit(const RV *v, int n) {
+void eng_xf_emit(const RV *v, int n) {
     /* Only the projection is used: the strip needs no clip tests. */
     XfParams p = {0, 640.0f, 0, 480.0f, NULL, NULL};
     for(int i = 0; i < n; i++) {
@@ -75,7 +75,7 @@ void dk_xf_emit(const RV *v, int n) {
     }
 }
 
-int dk_sq_tris(MeshSubmit *ms, const uint16_t *idx, int ntri, int cull) {
+int eng_sq_tris(MeshSubmit *ms, const uint16_t *idx, int ntri, int cull) {
     for(int t = 0; t < ntri; t++) {
         unsigned a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
         unsigned ca = ms->codes[a], cb = ms->codes[b], cc = ms->codes[c];
@@ -97,7 +97,7 @@ int dk_sq_tris(MeshSubmit *ms, const uint16_t *idx, int ntri, int cull) {
     return ntri;
 }
 
-uint32_t dk_xf_pos(const float (*pos)[4], int n, float (*out)[4], const XfParams *p) {
+uint32_t eng_xf_pos(const float (*pos)[4], int n, float (*out)[4], const XfParams *p) {
     unsigned and_code = 31, or_code = 0;
     for(int i = 0; i < n; i++) {
         pvr_vertex_t pv;
@@ -125,7 +125,7 @@ static inline void strip_vertex(const StripSubmit *ss, const uint16_t *e, uint32
    group * 4); 0 ends. Triangle k is k, k+1, k+2, its first two swapped
    when k is odd. A run of front faces k0..k1 goes as the sub-strip of
    vertices k0..k1 + 2. */
-void dk_sq_strips(StripSubmit *ss, const uint16_t *strips) {
+void eng_sq_strips(StripSubmit *ss, const uint16_t *strips) {
     const uint16_t *s = strips;
     for(int n; (n = *s++) != 0; s += n * 2) {
         int m = n - 2;

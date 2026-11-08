@@ -4,7 +4,8 @@
    water's edge on the outside of turn 1, walking with the tide as it comes
    and goes, and on Coral Crossing along the barrier rail on the beach side
    of both loops (on the sand beyond it, the barrier hides them), there
-   only on the first and final laps so they stay a treat. A
+   only on the first and final laps so they stay a treat; on Bay City
+   Hills along the pier's low sea-side rail, out and back. A
    kart coming near flushes a group: each bird lifts off away from it, out
    over the sea in a wide loop, and lands back where it was 5-7 s later (or
    goes round again if a kart is still close).
@@ -17,7 +18,7 @@
    hash, so the race RNG is left alone. */
 #include "birds.h"
 #include "kart.h"
-#include "render.h"
+#include "engine/render.h"
 #include "tide.h"
 #include "track.h"
 #include "world.h"
@@ -41,6 +42,7 @@ typedef struct {
     float height, seed;
     float sea;            /* which side the sea is: +1 right, -1 left */
     bool tidal;           /* stands at the tide's edge (Emerald Beach), else on the rail */
+    float rail_h;         /* the rail's top above the road */
     V3 home, dir;         /* takeoff point and heading out */
 } Gull;
 
@@ -91,7 +93,7 @@ static float ground_d(const Gull *g) {
 
 static V3 ground_pos(const Gull *g) {
     V3 p = track_point(g->s, g->d);
-    p.y = track_height(g->s) + (g->tidal ? 0.0f : f8m.wall_h) + GULL_Y;
+    p.y = track_height(g->s) + (g->tidal ? 0.0f : g->rail_h) + GULL_Y;
     return p;
 }
 
@@ -110,6 +112,7 @@ static void add_group(const GullGroup *gg) {
         int i = gull_n++;
         Gull *g = &gulls[i];
         g->tidal = gg->side == 0;
+        g->rail_h = track.id == TRACK_SF ? SF_PIER_RAIL_H : f8m.wall_h;
         g->sea = gg->side < 0 ? -1.0f : 1.0f;
         g->s = gg->s + ((float)j - (gg->n - 1) * 0.5f) * (g->tidal ? 2.4f : 3.0f) + (hash01(i, 1) - 0.5f) * 1.0f;
         const TrackSample *t = sample_at(g->s);
@@ -185,6 +188,12 @@ void birds_build(void) {
     }
     else if(track.id == TRACK_TEMPLE)
         flock_build();
+    else if(track.id == TRACK_SF) {
+        /* The pier's lanes out and back, the sea on their right. */
+        float out = track_seg_s(SF_PIER_SEG + 1), back = track_seg_s(SF_PIER_SEG + 3);
+        const GullGroup g[] = {{out + 18, 4, 1}, {out + 52, 3, 1}, {back + 16, 3, 1}, {back + 48, 4, 1}};
+        for(unsigned i = 0; i < sizeof(g) / sizeof(g[0]); i++) add_group(&g[i]);
+    }
 }
 
 /* The gull's flight: out and up away from the kart, round, and back down
@@ -268,67 +277,8 @@ void birds_update(float dt) {
     }
 }
 
-/* One bird in its own frame (+z forward, +y up): body, crown, beak, tail,
-   two wings of two panels each and, standing, two legs, coloured from pal
-   (body, shade, wing, tip, beak). open 0 folds the wings along the back, 1
-   spreads them; flap raises (+) or lowers (-) them. */
-static void draw_bird(V3 pos, float yaw, float pitch, float roll, float open, float flap, float scale,
-                      const uint32_t *pal, bool legs) {
-    /* Body 0-5 (head, tail end, left, right, back, belly), beak 6-8,
-       tail 9-11, then each wing: root front, root back, elbow front, elbow
-       back, tip. */
-    static const uint16_t idx[] = {
-        0, 2, 4, 0, 4, 3, 0, 3, 5, 0, 5, 2, 1, 4, 2, 1, 3, 4, 1, 5, 3, 1, 2, 5,
-        6, 7, 8, 9, 10, 11,
-        12, 13, 14, 13, 15, 14, 14, 15, 16,
-        17, 18, 19, 18, 20, 19, 19, 20, 21,
-        22, 0, 2, 22, 3, 0, 22, 4, 3, 22, 2, 4,      /* crown */
-        23, 24, 25, 26, 27, 28,                      /* legs */
-    };
-    const uint32_t body = pal[0], shade = pal[1], wing = pal[2], tip = pal[3], beak = pal[4];
-    RV v[29] __attribute__((aligned(32)));
-    int n = 0;
-#define P(x, y, z, c) (v[n++] = (RV){(x), (y), (z), 0, 0, (c)})
-    P(0, 0.07f, 0.30f, body);
-    P(0, 0.02f, -0.26f, shade);
-    P(-0.08f, 0, 0, body);
-    P(0.08f, 0, 0, body);
-    P(0, 0.10f, 0.02f, body);
-    P(0, -0.07f, 0, shade);
-    P(-0.015f, 0.06f, 0.30f, beak);
-    P(0.015f, 0.06f, 0.30f, beak);
-    P(0, 0.05f, 0.42f, beak);
-    P(-0.07f, 0.03f, -0.22f, shade);
-    P(0.07f, 0.03f, -0.22f, shade);
-    P(0, 0.02f, -0.38f, body);
-    /* Spread, the elbow sits 0.3 out and the tip 0.32 beyond, the outer
-       panel bending further than the inner; folded, both lie along the
-       back towards the tail. */
-    float c0 = cosf(flap), s0 = sinf(flap), c1 = cosf(flap * 1.5f), s1 = sinf(flap * 1.5f);
-    float ex = lerpf(0.09f, 0.30f * c0, open), ey = lerpf(0.07f, 0.30f * s0 + 0.04f, open);
-    float tx = lerpf(0.06f, 0.30f * c0 + 0.32f * c1, open), ty = lerpf(0.07f, ey + 0.32f * s1, open);
-    float ez = lerpf(-0.10f, 0.04f, open), tz = lerpf(-0.36f, -0.14f, open);
-    for(int sd = -1; sd <= 1; sd += 2) {
-        P(sd * 0.06f, 0.05f, 0.10f, wing);
-        P(sd * 0.06f, 0.05f, -0.10f, wing);
-        P(sd * ex, ey, ez, wing);
-        P(sd * ex, ey, ez - 0.14f, wing);
-        P(sd * tx, ty, tz, tip);
-    }
-    P(0, 0.16f, 0.24f, body);
-    for(int sd = -1; sd <= 1; sd += 2) {
-        P(sd * 0.035f, -0.04f, 0.04f, beak);
-        P(sd * 0.035f, -0.04f, -0.02f, beak);
-        P(sd * 0.035f, -0.17f, 0.02f, beak);
-    }
-#undef P
-    float m[16];
-    m4_translate_rotate(m, pos, yaw, pitch, roll);
-    m4_scale_apply(m, scale, scale, scale);
-    r_load_model(m);
-    int ni = (int)(sizeof(idx) / sizeof(idx[0]));
-    r_mesh(v, n, idx, legs ? ni : ni - 6, false);
-}
+#define ENG_BIRD_IMPL
+#include "engine/bird.h"
 
 static bool in_range(V3 p, float range, float radius) {
     float dx = p.x - r_cam.pos.x, dz = p.z - r_cam.pos.z;
@@ -349,7 +299,7 @@ static void draw_flock(void) {
         /* Frantic out of the trees, settling to a steadier beat. */
         float rate = lerpf(22.0f, 14.0f, clampf(t / 2.0f, 0, 1));
         float flap = 0.1f + 0.8f * sinf(t * rate + b->seed);
-        draw_bird(pos, atan2f(vel.x, vel.z), pitch, roll, clampf(t / 0.12f, 0, 1), flap, FLOCK_SCALE,
+        eng_bird_draw(pos, atan2f(vel.x, vel.z), pitch, roll, clampf(t / 0.12f, 0, 1), flap, FLOCK_SCALE,
                   parrot_pal[b->pal], false);
     }
 }
@@ -388,8 +338,10 @@ void birds_draw(void) {
             float beat = vel.y > 0 ? 1.0f : 0.25f + 0.25f * (sinf(g->air_t * 0.8f + g->seed) > 0.6f);
             flap = 0.15f + 0.75f * beat * sinf(g->air_t * 17.0f + g->seed);
         }
-        if(!in_range(pos, 220.0f, 1.2f)) continue;
-        draw_bird(pos, yaw, pitch, roll, open, flap, GULL_SCALE, gull_pal, g->air_t < 0);
+        /* Bay City Hills' pier is in view from the start straight, the
+           busiest view on the lap, where they are specks anyway. */
+        if(!in_range(pos, track.id == TRACK_SF ? 70.0f : 220.0f, 1.2f)) continue;
+        eng_bird_draw(pos, yaw, pitch, roll, open, flap, GULL_SCALE, gull_pal, g->air_t < 0);
     }
     r_load_vp();
 }

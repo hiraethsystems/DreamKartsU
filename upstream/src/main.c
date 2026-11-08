@@ -11,7 +11,7 @@
 #include "ui.h"
 #include "kart.h"
 #include "models.h"
-#include "render.h"
+#include "engine/render.h"
 #include "rumble.h"
 #include "vmuscreen.h"
 #include "title.h"
@@ -27,9 +27,12 @@
 #include "spectate.h"
 #include "film.h"
 #include "tide.h"
+#include "cablecar.h"
 #include "birds.h"
+#include "skylife.h"
 #include "gp.h"
-#include "prof.h"
+#include "engine/prof.h"
+#include "engine/frame.h"
 #include "version.h"
 #include "perfhud.h"
 #include "autotest.h"
@@ -52,13 +55,9 @@ static bool split_screen(void) {
     return game.num_players > 1 && (game.state == ST_COUNTDOWN || game.state == ST_RACE || game.state == ST_KARTS);
 }
 
-/* Accumulated microseconds per phase: update, world OP, karts, PT, TR
-   (prof.h); prof_last holds the latest frame's. */
-uint64_t prof_us[6];
-static uint32_t prof_last[6];
-int prof_frames;
-#define PROF_MARK(i) do { uint64_t _n = timer_us_gettime64(); prof_last[i] = (uint32_t)(_n - prof_t); \
-                          prof_us[i] += _n - prof_t; prof_t = _n; } while(0)
+/* The frame's phases for the autotest's log line and the perf overlay
+   (engine/prof.h): update, world OP, karts, PT, TR. */
+enum { PH_UPD, PH_WORLD, PH_KARTS, PH_PT, PH_TR, PH_COUNT };
 
 static void update_places(void);
 
@@ -128,6 +127,7 @@ void race_setup(void) {
 void race_reset(void) {
     int humans = game.num_players;
     game.race_time = 0;
+    cablecar_reset();
     game.countdown = 0;
     game.finished_count = 0;
     game.final_lap_announced = false;
@@ -150,10 +150,11 @@ void race_reset(void) {
     fx_clear();
     dolphins_reset();
     biplane_reset();
+    skylife_reset();
     world_race_progress(0);
     hud_reset();
     update_places();
-    items_reset(game.online ? online_items_seed() : dk_rand());
+    items_reset(game.online ? online_items_seed() : eng_rand());
 }
 
 void game_load_track(int id) {
@@ -190,13 +191,6 @@ void game_set_state(int state) {
 /* ------------------------------------------------------------------ */
 /* Cameras                                                             */
 
-static void camera_basis(Camera *c, V3 pos, V3 look) {
-    c->pos = pos;
-    c->fwd = vnorm(vsub(look, pos));
-    c->right = vnorm(vcross(v3(0, 1, 0), c->fwd));
-    c->up = vcross(c->fwd, c->right);
-}
-
 /* behind: turned round, from in front of the kart, a little higher and
    looking further back so the kart doesn't hide who's chasing. */
 static void chase_camera(Player *pl, float dt, bool behind) {
@@ -231,7 +225,7 @@ static void chase_camera(Player *pl, float dt, bool behind) {
         pos = vadd(pos, v3(frand_s() * shake, frand_s() * shake, frand_s() * shake));
         shake = fmaxf(0.0f, shake - dt * 1.2f);
     }
-    camera_basis(cam, pos, look);
+    cam_look_at(cam, pos, look);
     cam->shake = shake;
     float fov_t = 1.30f + n * 0.06f + (boost ? 0.14f : 0.0f);
     pl->fov += (fov_t - pl->fov) * smooth_k(5.0f, dt);
@@ -254,7 +248,7 @@ static void intro_camera(Camera *cam, float t) {
     V3 look1 = vadd(vmad(k->pos, back, 3.0f), v3(0, 0.95f, 0));
     /* Curve the path out over the sea side for a sweeping fly-in. */
     V3 mid = vadd(vlerp(start, end, e), vscale(v3(0, 1, 0), sinf(e * DK_PI) * 6.0f));
-    camera_basis(cam, mid, vlerp(look0, look1, e));
+    cam_look_at(cam, mid, vlerp(look0, look1, e));
     cam->fov = lerpf(1.1f, 1.30f, e);
     cam->shake = 0;
 }
@@ -264,7 +258,7 @@ static void results_camera(Camera *cam, float dt) {
     const Kart *k = &karts[gp.active && gp.page == 1 ? gp.rank[0] : game.player];
     float a = game.time * 0.3f + k->heading + DK_PI * 0.75f;
     V3 target = vadd(k->pos, v3(0, 0.9f, 0));
-    camera_basis(cam, vadd(target, v3(sinf(a) * 6.5f, 2.2f, cosf(a) * 6.5f)), target);
+    cam_look_at(cam, orbit_point(target, a, 6.5f, 2.2f), target);
     cam->fov = 1.2f;
     (void)dt;
 }
@@ -432,7 +426,7 @@ static void player_events(int pi, float dt) {
     }
     if(ev & EV_FINISH) {
         audio_sfx(DK_SFX_FINISH, 240, 128);
-        if(game.mode == MODE_TT || p->place <= 3) audio_sfx(DK_SFX_CHAO_HAPPY, 210, 128);
+        if(game.mode == MODE_TT || p->place <= 3) audio_sfx(DK_SFX_VOICE_HAPPY, 210, 128);
         fx_confetti(vadd(p->pos, v3(0, 1.5f, 0)), p->pos.y, game.num_players > 1 ? 50 : 90);
     }
     if(ev & (EV_WALL)) pl->cam.shake = fmaxf(pl->cam.shake, 0.12f);
@@ -536,7 +530,7 @@ static void countdown_step(float dt) {
         }
         for(int i = 0; i < kart_count; i++) {
             if(!karts[i].cpu) continue;
-            if((dk_rand() % 100) < 45) kart_start_boost(&karts[i], 0.8f + frand() * 0.4f, 1.08f);
+            if((eng_rand() % 100) < 45) kart_start_boost(&karts[i], 0.8f + frand() * 0.4f, 1.08f);
         }
         game.state = ST_RACE;
         game.time = 0;
@@ -870,7 +864,7 @@ static void draw_finish_banner(int pi, float y0, float y1) {
 }
 
 static void render(void) {
-    uint64_t prof_t = timer_us_gettime64();
+    prof_phase_begin();
     PROF_BEGIN(pp);
     int views = view_count();
     /* FlappyKarts keeps the course's sky, clouds and mountains and draws
@@ -889,7 +883,7 @@ static void render(void) {
         set_view(v);
         world_draw_op();
     }
-    PROF_MARK(1);
+    prof_phase_mark(PH_WORLD);
     PROF_LAP(PS_PHASE_WORLD, pp);
     if(!(dk_probe_off & PROBE_KARTS))
         for(int v = 0; v < views; v++) {
@@ -904,7 +898,7 @@ static void render(void) {
             biplane_draw();
             PROF_LAP(PS_DOLPHINS, pd);
         }
-    PROF_MARK(2);
+    prof_phase_mark(PH_KARTS);
     PROF_LAP(PS_PHASE_KARTS, pp);
     /* The pause menu's Y toggle hides the overlays like the -hud probe. */
     bool hud_off = (dk_probe_off & PROBE_HUD) || (game.paused && game.hud_hidden);
@@ -919,7 +913,7 @@ static void render(void) {
             set_view(v);
             world_draw_pt();
         }
-    PROF_MARK(3);
+    prof_phase_mark(PH_PT);
     PROF_LAP(PS_PHASE_PT, pp);
 
     r_list(PVR_LIST_OP_MOD);
@@ -1010,9 +1004,9 @@ static void render(void) {
     if(perfhud_mode == PERF_FPS && !hud_off && !(dk_probe_off & PROBE_PERFHUD)) perfhud_draw_fps(views > 1);
     r_frame_end();
     dk_probe_off = probe_saved;
-    PROF_MARK(4);
+    prof_phase_mark(PH_TR);
     PROF_LAP(PS_PHASE_TR, pp);
-    prof_frames++;
+    prof_phase_frame();
 }
 
 /* One frame of the loading screen between boot steps. */
@@ -1074,10 +1068,10 @@ int main(int argc, char **argv) {
     render_init();
     perfhud_reserve();
     hud_init();
-    ui_init();
+    dk_ui_init();
     title_init();
     flappy_init();
-    boot_screen(boot_t0, 0.1f, "WAKING UP THE CHAO");
+    boot_screen(boot_t0, 0.1f, "WAKING UP THE DRIVERS");
     audio_disc_init();   /* before the save worker: see audio.h */
     save_init();   /* the card is read while the rest loads */
     audio_music_volume(save.volume);
@@ -1180,42 +1174,15 @@ int main(int argc, char **argv) {
     audio_music_target(210);
 #endif
 
-#ifdef DK_PROF
+#ifdef ENG_PROF
     prof_start();
 #endif
-    uint64_t last = timer_us_gettime64();
-    uint64_t fps_t0 = last;
-    int fps_frames = 0;
-    /* Physics runs one step per displayed frame. pvr_wait_ready() paces
-       the loop to the display, whose period is not 1/60 s (16.68 ms on an
-       NTSC console, whatever the host gives in Flycast), so a fixed 1/60
-       step would owe the clock a whole step every few seconds and run
-       twice in one frame: a one-frame hitch of everything. The step is the
-       measured vblank period instead, nudged by up to 1% toward the time
-       still owed so game time stays on the clock; only a frame that missed
-       vblanks takes more than one step. */
-    float vbl_dt = DK_DT;   /* smoothed length of a single-vblank frame */
-    float owed = 0;         /* clock time not yet stepped: timer jitter, normally */
+    frame_init();
     while(!game.quit) {
-        pvr_wait_ready();
-        uint64_t now = timer_us_gettime64();
-        float dt_real = (float)(now - last) * 1e-6f;
-        last = now;
-        if(dt_real > 0.1f) dt_real = 0.1f;
-        owed += dt_real;
-        int steps = 1;
-        if(dt_real < 1.5f * vbl_dt) {
-            vbl_dt = clampf(vbl_dt + (dt_real - vbl_dt) * 0.01f, 0.8f * DK_DT, 1.25f * DK_DT);
-        }
-        else {
-            steps = (int)(dt_real / vbl_dt + 0.5f);
-            if(steps > 4) {   /* a stall: forget the time rather than replay it */
-                steps = 4;
-                owed = steps * vbl_dt;
-            }
-        }
-        float dt = vbl_dt + clampf((owed / steps - vbl_dt) * 0.1f, -0.01f * vbl_dt, 0.01f * vbl_dt);
-        owed = clampf(owed - steps * dt, -vbl_dt, vbl_dt);
+        /* The step follows the display (engine/frame.h). */
+        frame_begin();
+        float dt_real = eng_frame.dt_real, dt = eng_frame.dt;
+        int steps = eng_frame.steps;
 #ifdef DK_AT_FIXED
         /* Repeatable captures: one 1/60 s step a frame whatever the host's
            timing, and the frame held still while a screenshot is taken. */
@@ -1227,7 +1194,7 @@ int main(int argc, char **argv) {
         }
 #endif
 
-        uint64_t upd_t0 = timer_us_gettime64();
+        prof_phase_begin();
         PROF_BEGIN(pu);
         PROF_BEGIN(pus);
         input_update();
@@ -1245,7 +1212,7 @@ int main(int argc, char **argv) {
         }
         if(game.online) online_tick();
 #if defined(DK_HW) && defined(DK_CAPTURE)
-        if(probe_step(prof_last)) {
+        if(probe_step(prof_phase_last)) {
             steps = 0;
             at_skip = 1;
         }
@@ -1265,6 +1232,7 @@ int main(int argc, char **argv) {
             input_step_taken();
         }
         PROF_LAP(PS_U_STEP, pus);
+        ui_time = game.title_t;
         update_camera(dt_real);
         PROF_LAP(PS_U_CAMERA, pus);
         audio_update(dt_real);
@@ -1273,31 +1241,32 @@ int main(int argc, char **argv) {
         for(int p = 0; p < MAX_PLAYERS; p++)
             audio_kart_loops(p, engines && p < game.num_players ? &karts[game.pl[p].kart] : NULL, dt_real);
         biplane_audio(engines && game.state == ST_RACE);
+        world_sf_audio(engines && game.state == ST_RACE, dt_real);
         PROF_LAP(PS_U_AUDIO, pus);
         rumble_update(dt_real, (game.state == ST_RACE || game.state == ST_COUNTDOWN) && !game.paused);
         vmuscreen_update(dt_real);
         PROF_LAP(PS_U_OTHER, pus);
-        prof_us[0] += timer_us_gettime64() - upd_t0;
+        prof_phase_mark(PH_UPD);
         PROF_LAP(PS_PHASE_UPD, pu);
         render();
-#ifdef DK_PROF
+#ifdef ENG_PROF
         prof_frame_end();
 #endif
 
-        uint64_t end = timer_us_gettime64();
-        game.cpu_ms = (float)(end - now) * 0.001f;
+        bool second = frame_end();
+        game.cpu_ms = eng_frame.cpu_ms;
         {
             /* This frame's share of the phase totals (the autotest zeroes
                them every log line), kept up while the overlay is off so
                switching it on doesn't start with one huge frame. */
-            static uint64_t prof_prev[5];
-            float phase_ms[5];
-            for(int i = 0; i < 5; i++) {
-                uint64_t d = prof_us[i] >= prof_prev[i] ? prof_us[i] - prof_prev[i] : prof_us[i];
+            static uint64_t prof_prev[PH_COUNT];
+            float phase_ms[PH_COUNT];
+            for(int i = 0; i < PH_COUNT; i++) {
+                uint64_t d = prof_phase_us[i] >= prof_prev[i] ? prof_phase_us[i] - prof_prev[i] : prof_phase_us[i];
                 phase_ms[i] = (float)d * 0.001f;
-                prof_prev[i] = prof_us[i];
+                prof_prev[i] = prof_phase_us[i];
             }
-            int missed = dt_real > 1.5f * vbl_dt ? (int)(dt_real / vbl_dt + 0.5f) - 1 : 0;
+            int missed = frame_missed(dt_real);
 #ifdef DK_AUTOTEST
             /* Leave out the frames a screenshot or log line stalled, as the
                autotest's own timing does. */
@@ -1305,11 +1274,8 @@ int main(int argc, char **argv) {
 #endif
                 if(perfhud_mode == PERF_OVERLAY) perfhud_frame(dt_real, game.cpu_ms, phase_ms, missed);
         }
-        fps_frames++;
-        if(end - fps_t0 >= 1000000) {
-            game.fps = fps_frames * 1e6f / (float)(end - fps_t0);
-            fps_frames = 0;
-            fps_t0 = end;
+        if(second) {
+            game.fps = eng_frame.fps;
 #if defined(DK_PERF_LOG) && !defined(DK_AUTOTEST)
             /* Off by default: under dcload-ip each printf runs with IRQs
                off, costs a frame or more and can freeze the console. */
@@ -1319,7 +1285,7 @@ int main(int argc, char **argv) {
 #endif
         }
 #ifdef DK_AUTOTEST
-        at_frame(dt_real, vbl_dt, steps);
+        at_frame(dt_real, eng_frame.vbl_dt, steps);
 #endif
     }
     save_finish();

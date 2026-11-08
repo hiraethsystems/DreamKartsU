@@ -101,6 +101,10 @@ $(OUT)/up/%.o: $(UP)/src/%.c | $(OUT)/version.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(UP_QUIET_$*) -c -o $@ $<
 
+$(OUT)/up/%.o: $(ENGINE)/%.c | $(OUT)/version.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(UP_QUIET_$*) -c -o $@ $<
+
 $(OUT)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<

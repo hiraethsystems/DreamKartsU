@@ -250,6 +250,7 @@ extern uint32_t pvr_dr_addr;
 /* Paces the frame loop: the platform presents the finished frame, pumps
    its events and waits for the next display refresh here. */
 int pvr_wait_ready(void);
+int pvr_wait_render_done(void);
 int pvr_scene_begin(void);
 int pvr_scene_finish(void);
 

@@ -856,3 +856,26 @@ At tags `m3`, `m5`, `m6`, `m7`:
 - 2026-11-07: **Rumble parked** (Aisling). The code stays: the console
   accepts its calls, and pads are read once a frame. Not known whether this
   GamePad's motor works at all.
+- 2026-11-08: **Upstream updated to `af4eb66`** (8 Nov, 33 commits since
+  `eaee474`): Bay City Hills (track 10, a San Francisco street circuit
+  with a cable car), Neon Skyway's UFO and freeways, tide online and in Time
+  Trial, a drift counter setting, a shared texture pool per track, and
+  Rich's move of the renderer, input, profiler and RNG into a shared engine
+  (`projects/common/engine`, for his new game Ridgeline). Network build
+  32 to **35, minimum 35**: the live server would now refuse the old port.
+  - `tools/update_upstream.sh` merged cleanly but deleted `src/render.c` and
+    `src/prof.h` with our edits, which moved with them; re-applied in
+    `upstream_common/engine/` (UPSTREAM.md). The script now lists edits lost
+    to a moved file. `dk_xf_*` became `eng_xf_*` (`port/xform_c.c`
+    renamed to match; `xform.S` changed in names only).
+  - Shim: `pvr_wait_render_done` (the texture pool waits for it before
+    reloading). `sources.mk` takes upstream's new source list and order.
+  - Test fixes found on the way: `test_host.sh` ran stale xfcheck programs
+    since the `-cpu` folder name (2026-11-07), which was the "no audio"
+    flake; it now relinks and runs the right one. `test_native.sh` compared
+    music counts (real time, not the race's clock) and timed out on Bay
+    City Hills' CPU run; both fixed. Track 10 added to the track lists.
+  - Checks, all PASS on all nine tracks: `test_host.sh` null, GL and
+    xfcheck, `test_native.sh`, `test_be.sh`, `test_saves.sh`,
+    `test_wiiu.sh` (Cemu). Rich's lobby server and `dk-bot` build here with
+    Go 1.24 and no downloads, for M6.

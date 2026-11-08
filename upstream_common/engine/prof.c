@@ -1,9 +1,36 @@
-/* The benchmark builds' section counters (prof.h), banked per counter-1
-   event each frame and reported once a log window. */
-#include "dk.h"
+/* Engine: the benchmark builds' section counters (prof.h), banked per
+   counter-1 event each frame and reported once a log window. */
 #include "prof.h"
+#include <kos.h>
+#include <stdio.h>
+#include <string.h>
 
-#ifdef DK_PROF
+uint64_t prof_phase_us[PROF_PHASES];
+uint32_t prof_phase_last[PROF_PHASES];
+int prof_phase_frames;
+static uint64_t phase_t;
+
+void prof_phase_begin(void) {
+    phase_t = timer_us_gettime64();
+}
+
+void prof_phase_mark(int phase) {
+    uint64_t now = timer_us_gettime64();
+    prof_phase_last[phase] = (uint32_t)(now - phase_t);
+    prof_phase_us[phase] += now - phase_t;
+    phase_t = now;
+}
+
+void prof_phase_frame(void) {
+    prof_phase_frames++;
+}
+
+void prof_phase_reset(void) {
+    memset(prof_phase_us, 0, sizeof(prof_phase_us));
+    prof_phase_frames = 0;
+}
+
+#ifdef ENG_PROF
 uint32_t prof_cyc[PS_COUNT], prof_ev[PS_COUNT], prof_n[PN_COUNT];
 static uint64_t prof_n_win[PN_COUNT];
 static uint64_t prof_cyc_win[PROF_EVENTS][PS_COUNT], prof_ev_win[PROF_EVENTS][PS_COUNT];
@@ -31,11 +58,9 @@ void prof_frame_end(void) {
    cycles stalled on operand-cache misses (D) and on the FPU (F), and its
    operand-cache misses a frame (M). */
 void prof_print(void) {
-    static const char *const names[PS_COUNT] = {"mats", "light", "mxform", "msubmit", "dolphins", "chunks", "sky",
-                                                "sea", "foam", "upd", "world", "karts", "pt", "shadows", "tr", "u-input",
-                                                "u-step", "u-camera", "u-audio", "u-other"};
+    static const char *const names[PS_COUNT] = PROF_SECTION_NAMES;
     char line[PS_COUNT * 40 + PN_COUNT * 20 + 16], *o = line;
-    o += sprintf(o, "DK PC");
+    o += sprintf(o, ENG_PROF_TAG);
     for(int i = 0; i < PS_COUNT; i++) {
         uint64_t cyc = 0;
         int frames = 0;
@@ -53,8 +78,7 @@ void prof_print(void) {
     }
     /* Work a frame: strip vertices transformed/emitted, strips culled and
        clipped, mesh vertices, triangles sent and back faces, vertices lit. */
-    static const char *const counts[PN_COUNT] = {"sv", "se", "scull", "sclip", "mv", "mt", "mback", "lv", "sin",
-                                                 "sout", "strips", "hdrs"};
+    static const char *const counts[PN_COUNT] = PROF_COUNT_NAMES;
     int frames = prof_ev_frames[0] + prof_ev_frames[1] + prof_ev_frames[2];
     o += sprintf(o, " |");
     for(int i = 0; i < PN_COUNT; i++)

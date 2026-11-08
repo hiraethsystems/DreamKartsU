@@ -3,7 +3,7 @@
 #include "fx.h"
 #include "hud.h"
 #include "models.h"
-#include "render.h"
+#include "engine/render.h"
 #include "texture_assets.h"
 #include "world.h"
 
@@ -154,7 +154,7 @@ uint32_t items_colour(int item) {
 const char *items_name(int item) {
     switch(item) {
         case ITEM_SNEAKERS: return "POWER SNEAKERS";
-        case ITEM_SPEAR: return "CHAOS SPEAR";
+        case ITEM_SPEAR: return "STAR SPEAR";
         case ITEM_SHIELD: return "BARRIER";
         case ITEM_MINE: return "MINE";
         default: return "";

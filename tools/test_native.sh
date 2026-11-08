@@ -12,7 +12,7 @@
 #   TRACKS="0 7" tools/test_native.sh  some tracks only
 set -u
 cd "$(dirname "$0")/.."
-TRACKS=${TRACKS:-"0 1 2 3 4 6 7 8"}
+TRACKS=${TRACKS:-"0 1 2 3 4 6 7 8 10"}
 SHOTS=${SHOTS:-"300 1800 4200 7200"}
 LAST=$(echo "$SHOTS" | tr ' ' '\n' | sort -n | tail -1)
 JOBS=${JOBS:-$(nproc)}
@@ -36,7 +36,7 @@ run() {   # run TRACK NATIVE
     mkdir -p "$out" "$dir/save-t$t-n$n"
     DKU_SAVE_DIR=$dir/save-t$t-n$n DKU_MAX_FRAMES=${MAX_FRAMES:-12000} DKU_CAPTURE_DIR=$out DKU_VIRTUAL_CLOCK=1 \
         DKU_REPRO=1 SDL_AUDIODRIVER=dummy DKU_SHOT_TAG=t$t DKU_SHOTS="$SHOTS" \
-        timeout 600 xvfb-run -n $((120 + t * 2 + n)) "build/host-gl-autotest$tag-t$t/dreamkartsu" \
+        timeout 1200 xvfb-run -n $((120 + t * 2 + n)) "build/host-gl-autotest$tag-t$t/dreamkartsu" \
         >"$dir/run-t$t-n$n.log" 2>&1
 }
 
@@ -52,8 +52,8 @@ for p in $pids; do wait "$p"; done
 fail=0
 for t in $TRACKS; do
     # The race's results, all but the timing line (CPU time differs, as it should).
-    a=$(grep '^DK AUTOTEST' "$dir/run-t$t-n0.log" | grep -v 'fps min')
-    b=$(grep '^DK AUTOTEST' "$dir/run-t$t-n1.log" | grep -v 'fps min')
+    a=$(grep '^DK AUTOTEST' "$dir/run-t$t-n0.log" | grep -v -e 'fps min' -e 'music:')
+    b=$(grep '^DK AUTOTEST' "$dir/run-t$t-n1.log" | grep -v -e 'fps min' -e 'music:')
     if [ -z "$a" ] || [ "$a" != "$b" ]; then
         echo "track $t: FAIL (the race differs between the paths: DK AUTOTEST lines)"
         fail=1

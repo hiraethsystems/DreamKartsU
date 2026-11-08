@@ -4,6 +4,7 @@
    own -D flags (README), so a release build has none of it; main.c calls
    in from its frame loop and race step. */
 #include "autotest.h"
+#include "engine/qa.h"
 #include "audio.h"
 #include "biplane.h"
 #include "dolphins.h"
@@ -16,8 +17,8 @@
 #include "net.h"
 #include "online.h"
 #include "perfhud.h"
-#include "prof.h"
-#include "render.h"
+#include "engine/prof.h"
+#include "engine/render.h"
 #include "rumble.h"
 #include "spectate.h"
 #include "title.h"
@@ -40,9 +41,8 @@ static struct {
     float log_t;
     bool done;
     bool gp_done, gp_fail;   /* Grand Prix: verdict printed, a race failed */
-    int win_frames, win_missed, frames, missed;
-    int win_multi, win_zero, multi, zero;   /* frames that ran 2+ or 0 physics steps */
-    float win_cpu_max, rnd_max_ms;
+    QaWindow win;                /* this log window (engine/qa.h) */
+    int frames, missed, multi, zero;   /* the run: frames, dropped vblanks, frames that ran 2+ or 0 steps */
     size_t vtx_max;
     /* The drawn karts against the road as drawn: the deepest any tyre was
        drawn under it, and kart-frames by depth (clear, under 1, 2, 5,
@@ -84,11 +84,12 @@ void take_shot(const char *name) {
         b = (const uint8_t *)n;
         for(size_t i = 0; i < sizeof(n); i++) h = (h ^ b[i]) * 16777619u;
     }
-    printf("DK SHOT %s\nDK STATE %s karts=%08lx rand=%08lx t=%.4f\n", name, name, (unsigned long)h,
-           (unsigned long)dk_rand_peek(), (double)game.time);
+    qa_shot("%s", name);
+    printf("DK STATE %s karts=%08lx rand=%08lx t=%.4f\n", name, (unsigned long)h,
+           (unsigned long)eng_rand_peek(), (double)game.time);
     at_hold = 150;
 #else
-    printf("DK SHOT %s\n", name);
+    qa_shot("%s", name);
 #endif
 #endif
 }
@@ -106,7 +107,7 @@ void capture_script(void) {
 #endif
     static float t;
     static int step;
-    static bool shot[72];
+    static bool shot[88];
     t += DK_DT;
     const Kart *p = &karts[game.player];
     /* Power-ups: an emerald coming up, the gem held, a spear in flight,
@@ -317,6 +318,19 @@ void capture_script(void) {
             if(!shot[64 + i] && fabsf(track_delta(track_seg_s(av_shots[i].seg) + av_shots[i].at, p->tp.s)) < 3.0f) {
                 shot[64 + i] = true;
                 take_shot(av_shots[i].name);
+            }
+    }
+    /* Bay City Hills: down the Embarcadero toward the bridge, the pier
+       head, under the wharf's sign, up Hyde Street, the summit, the
+       crooked street, the avenue and the top of the plunge. */
+    if(game.state == ST_RACE && track.id == TRACK_SF) {
+        static const struct { int seg; float at; const char *name; } sf_shots[8] = {
+            {0, 60.0f, "sf-line"}, {3, 12.0f, "sf-pier"}, {6, 8.0f, "sf-wharf"}, {12, 64.0f, "sf-hyde"},
+            {14, 6.0f, "sf-summit"}, {18, 8.0f, "sf-crooked"}, {26, 10.0f, "sf-avenue"}, {30, 4.0f, "sf-plunge"}};
+        for(int i = 0; i < 8; i++)
+            if(!shot[76 + i] && fabsf(track_delta(track_seg_s(sf_shots[i].seg) + sf_shots[i].at, p->tp.s)) < 3.0f) {
+                shot[76 + i] = true;
+                take_shot(sf_shots[i].name);
             }
     }
     /* Cyberstone: the first chicane, the crest, down the drop, the
@@ -755,25 +769,13 @@ void at_frame(float dt_real, float vbl_dt, int steps) {
         at_skip--;
     }
     else {
-        at.win_frames++;
+        float rnd = qa_window_frame(&at.win, dt_real, steps, game.cpu_ms);
         at.frames++;
-        if(dt_real > 1.5f / 60.0f) {
-            at.win_missed++;
-            at.missed++;
-        }
-        if(steps >= 2) {
-            at.win_multi++;
-            at.multi++;
-        }
-        else if(steps == 0) {
-            at.win_zero++;
-            at.zero++;
-        }
-        if(game.cpu_ms > at.win_cpu_max) at.win_cpu_max = game.cpu_ms;
-        pvr_stats_t ps;
-        if(pvr_get_stats(&ps) == 0 && ps.rnd_last_time < 100000000ull) {
-            float rnd = (float)ps.rnd_last_time * 1e-6f;
-            if(rnd > at.rnd_max_ms) at.rnd_max_ms = rnd;
+        if(dt_real > 1.5f / 60.0f) at.missed++;
+        if(steps >= 2) at.multi++;
+        else if(steps == 0) at.zero++;
+        if(at.win.vtx_max > at.vtx_max) at.vtx_max = at.win.vtx_max;
+        {
 #ifdef DK_AT_PVRSPIKE
             /* Where a slow render happens, at most one line in 4 s
                (each printf under dcload stalls the console). */
@@ -785,7 +787,7 @@ void at_frame(float dt_real, float vbl_dt, int steps) {
                        rstats.tris, rstats.verts);
             }
 #endif
-            if(ps.vtx_buffer_used_max > at.vtx_max) at.vtx_max = ps.vtx_buffer_used_max;
+            (void)rnd;
         }
         if(game.state == ST_RACE || game.state == ST_RESULTS) {
             at.cpu_sum += game.cpu_ms;
@@ -814,17 +816,17 @@ void at_frame(float dt_real, float vbl_dt, int steps) {
     at.log_t += dt_real;
     if(at.log_t >= AT_LOG_SECS) {
         at.log_t = 0;
-        float f = prof_frames ? 1.0f / (prof_frames * 1000.0f) : 0;
+        float f = prof_phase_frames ? 1.0f / (prof_phase_frames * 1000.0f) : 0;
         printf("DK AT %s t=%.1f fps=%.1f missed=%d/%d multi=%d zero=%d step=%.3fms cpu=%.2fms max=%.2fms "
                "[upd %.2f world %.2f karts %.2f pt %.2f tr %.2f] pvr=%.2fms tris=%d lap=%d place=%d spd=%.1f "
                "drift=%d stage=%d\n",
-               state_names[game.state], (double)game.race_time, (double)game.fps, at.win_missed,
-               at.win_frames, at.win_multi, at.win_zero, (double)(vbl_dt * 1000.0f), (double)game.cpu_ms,
-               (double)at.win_cpu_max, (double)(prof_us[0] * f),
-               (double)(prof_us[1] * f), (double)(prof_us[2] * f), (double)(prof_us[3] * f),
-               (double)(prof_us[4] * f), (double)at.rnd_max_ms, rstats.tris, p->lap, p->place,
+               state_names[game.state], (double)game.race_time, (double)game.fps, at.win.missed,
+               at.win.frames, at.win.multi, at.win.zero, (double)(vbl_dt * 1000.0f), (double)game.cpu_ms,
+               (double)at.win.cpu_max, (double)(prof_phase_us[0] * f),
+               (double)(prof_phase_us[1] * f), (double)(prof_phase_us[2] * f), (double)(prof_phase_us[3] * f),
+               (double)(prof_phase_us[4] * f), (double)at.win.rnd_max, rstats.tris, p->lap, p->place,
                (double)p->speed, p->drift, p->stage);
-#ifdef DK_PROF
+#ifdef ENG_PROF
         prof_print();
 #endif
 #ifdef DK_XF_CHECK
@@ -834,10 +836,8 @@ void at_frame(float dt_real, float vbl_dt, int steps) {
                    (unsigned long)xf_mismatch);
         }
 #endif
-        memset(prof_us, 0, sizeof(prof_us));
-        prof_frames = 0;
-        at.win_frames = at.win_missed = at.win_multi = at.win_zero = 0;
-        at.win_cpu_max = at.rnd_max_ms = 0;
+        prof_phase_reset();
+        qa_window_reset(&at.win);
         at_skip = 2;
     }
 #ifdef DK_AT_GP
@@ -990,8 +990,8 @@ bool at_hold_frame(void) {
     static uint32_t hold_rand;
     if(at_hold > 0) {
         at_hold--;
-        if(!holding) hold_rand = dk_rand_peek();
-        else dk_seed(hold_rand);
+        if(!holding) hold_rand = eng_rand_peek();
+        else eng_seed(hold_rand);
         holding = true;
         return true;
     }
@@ -1049,7 +1049,7 @@ static void tour_shot(const char *name, V3 pos, V3 look) {
         pvr_wait_ready();
         world_update(DK_DT);
         game_render();
-        if(f == 12) printf("DK SHOT %s\n", name);
+        if(f == 12) qa_shot("%s", name);
         if(f == 11) printf("DK SHOTSTATS %s tris=%d verts=%d\n", name, rstats.tris, rstats.verts);
 #ifdef DK_CHUNK_STATS
         {
@@ -1234,6 +1234,9 @@ void camera_tour(void) {
     dk_probe_off |= PROBE_HUD;
     game.state = ST_RESULTS;
     for(int tr = 0; tr < TRACK_COUNT; tr++) {
+#ifdef DK_AT_TRACK
+        if(tr != DK_AT_TRACK) continue;   /* one track's cameras */
+#endif
         game_load_track(tr);
         spectate_begin();
         for(int i = 0; i < spectate_tv_count(); i++) {
@@ -1251,7 +1254,7 @@ void camera_tour(void) {
             for(int f = 0; f < 150; f++) {   /* 2.5 s: capture.py's screenshots fall behind at less on a busy Mac */
                 pvr_wait_ready();
                 game_render();
-                if(f == 20) printf("DK SHOT tv-%d-%02d\n", tr, i + 1);
+                if(f == 20) qa_shot("tv-%d-%02d", tr, i + 1);
             }
         }
     }
@@ -1289,13 +1292,13 @@ static float rec_range(float lo, float hi) {
 /* A personality: one of a few driving types, jittered. */
 static void record_personality(int i, Kart *k) {
     float look = rec_range(0.9f, 1.1f), sway = rec_range(0.5f, 1.4f), lead = rec_range(-2.0f, 6.0f);
-    float grip = rec_range(0.05f, 0.2f), sways = (float)(2 + dk_rand() % 5);
+    float grip = rec_range(0.05f, 0.2f), sways = (float)(2 + eng_rand() % 5);
     k->lane = rec_range(-1.8f, 1.8f);
     k->skill = rec_range(0.94f, 1.0f);
-    switch(dk_rand() % 6) {
+    switch(eng_rand() % 6) {
         case 0: grip = 0.0f; lead = rec_range(8.0f, 12.0f); look = rec_range(0.85f, 0.95f); break;  /* drifts early, always */
         case 1: look = rec_range(1.12f, 1.22f); sway = rec_range(0.2f, 0.6f); break;                 /* smooth and tidy */
-        case 2: sway = rec_range(1.7f, 2.3f); sways = (float)(5 + dk_rand() % 2); break;             /* weaver */
+        case 2: sway = rec_range(1.7f, 2.3f); sways = (float)(5 + eng_rand() % 2); break;             /* weaver */
         case 3: grip = rec_range(0.45f, 0.7f); look = rec_range(1.0f, 1.15f); break;                 /* grips, rarely slides */
         case 4: lead = rec_range(-4.0f, -2.0f); look = rec_range(0.85f, 0.92f); break;               /* late and twitchy */
         default: k->lane = signf(frand_s()) * rec_range(2.0f, 2.6f); break;                          /* wide lines */
@@ -1322,7 +1325,7 @@ void record_races(uint64_t t0) {
 #endif
         game_load_track(tr);
         for(int r = 0; r < DK_RECORD_RACES; r++, done++) {
-            dk_seed(0x5eed0000u + (uint32_t)tr * 977u + (uint32_t)r * 7919u);
+            eng_seed(0x5eed0000u + (uint32_t)tr * 977u + (uint32_t)r * 7919u);
             race_setup();
             int race_id = tr * DK_RECORD_RACES + r + 1;   /* 1-255: never 0, never two tracks alike */
             items_reset(online_items_seed_for(DK_RECORD_LOBBY, race_id, tr));

@@ -1,5 +1,6 @@
 /* Track scenery: Emerald Beach, Coral Crossing, Palm Harbour, Temple Hill,
-   Neon Skyway, Cyberstone, Spiral Canyon, Tsudoken Drift and Apple Valley.
+   Neon Skyway, Cyberstone, Spiral Canyon, Tsudoken Drift, Apple Valley and
+   Bay City Hills.
 
    Static geometry (track surfaces, terrain, props, palm trees) is generated
    once into a pool of world-space triangle strips grouped into chunks with
@@ -10,10 +11,12 @@
    This file builds and draws it; each track's own scenery is built in
    world_<track>.c (world_int.h lists who does what). */
 #include "tide.h"
+#include "engine/sky.h"
 #include "birds.h"
+#include "skylife.h"
 #include "world_int.h"
 #include "roam.h"
-#include "prof.h"
+#include "engine/prof.h"
 #include <malloc.h>
 #include <sh4zam/shz_sh4zam.h>
 
@@ -28,6 +31,8 @@ static bool world_tk;
 static bool world_av;
 /* Night Meet: Free Roam's parking area on the bay at night. */
 static bool world_lot;
+/* Bay City Hills: San Francisco's streets, on the bay. */
+static bool world_sf;
 /* Golden hour (Spiral Canyon, Tsudoken Drift): a low sun, everything
    graded warm; the canyon's is a retrowave sun ahead down the start
    straight, Tsudoken's sets beside Fuji in the south-west. */
@@ -38,6 +43,8 @@ static V3 sun_disc_dir;   /* where the sun's disc and lens flare sit */
 #define DR_SUN_EL   0.11f
 #define DR_SUN_SINK 1.0f
 static V3 sun_ahead;
+/* tan of the daytime sky sun's elevation (~14 degrees), see world_build. */
+#define SKY_SUN_EL  0.25f
 uint16_t world_light[3] = {256, 256, 256};
 
 #ifdef DK_CHUNK_STATS
@@ -96,7 +103,7 @@ V3 foam_p[MAX_FOAM], foam_n[MAX_FOAM];
 float foam_u[MAX_FOAM];
 bool foam_on[MAX_FOAM];
 int foam_count;
-static V3 sky_dir[7][13];
+static SkyDome sky;   /* engine/sky.h: 7 rings of 12 */
 V3 ring_dir[25];
 
 /* Headers. */
@@ -129,6 +136,7 @@ float world_ground_y(float x, float z) {
         case TRACK_TSUDOKEN: return tk_terrain(x, z);
         case TRACK_APPLE: return av_terrain(x, z);
         case TRACK_LOT: return 0.0f;
+        case TRACK_SF: return sf_terrain(x, z);
         default: return -100.0f;   /* clouds */
     }
 }
@@ -188,13 +196,10 @@ void world_init(void) {
     h_far_sprite = h_palm_far;
     av_init();
     lot_init();
+    sf_init();
 
     static const float elev[] = {-0.25f, 0.0f, 0.10f, 0.28f, 0.62f, 1.05f, 1.5708f};
-    for(int e = 0; e < 7; e++)
-        for(int i = 0; i <= 12; i++) {
-            float a = (float)i / 12 * DK_TAU;
-            sky_dir[e][i] = v3(sinf(a) * cosf(elev[e]), sinf(elev[e]), cosf(a) * cosf(elev[e]));
-        }
+    sky_init(&sky, elev, 7, 12, 1500.0f, h_sky);
     for(int i = 0; i <= 24; i++) {
         float a = (float)i / 24 * DK_TAU;
         ring_dir[i] = v3(sinf(a), -cosf(a), cosf(a));
@@ -258,6 +263,7 @@ float world_surface_y(float s, float d) {
 void world_build(void) {
     world_gates = 0;
     if(!pool) return;
+    render_load_tex_set(track.id);
     pool_n = strip_n = chunk_n = palm_n = far_sprite_n = foam_count = 0;
     stand_wave = false;
     cur_chunk = NULL;
@@ -266,6 +272,7 @@ void world_build(void) {
     world_tk = track.id == TRACK_TSUDOKEN;
     world_av = track.id == TRACK_APPLE;
     world_lot = track.id == TRACK_LOT;
+    world_sf = track.id == TRACK_SF;
     world_night = (track.in_sky && !world_canyon) || world_lot;
 #ifdef DK_ROCK_TINT
     world_sunset = false;   /* the leak test reads colours */
@@ -290,6 +297,19 @@ void world_build(void) {
         world_sun_dir = vnorm(v3(sinf(AV_SUN_DIR), 0.95f, cosf(AV_SUN_DIR)));
         sun_disc_dir = world_sun_dir;
     }
+    if(world_sf) {
+        /* A clear afternoon, the sun in the south-west over the Golden
+           Gate's side of the city, its disc low enough to be seen. */
+        world_sun_dir = vnorm(v3(sinf(230.0f * DK_PI / 180.0f), 0.85f, cosf(230.0f * DK_PI / 180.0f)));
+    }
+    if(!world_night && !world_canyon && !world_tk && !world_av) {
+        /* The sky's sun sits lower than the light comes from: the chase
+           camera tilts down ~9 degrees and sees only ~21 degrees above the
+           horizon, so a disc where the light is (33 degrees up) stayed off
+           screen and its lens flare only showed up Coral's ramp. */
+        V3 h = vnorm(v3(world_sun_dir.x, 0.0f, world_sun_dir.z));
+        sun_disc_dir = vnorm(vadd(h, v3(0, SKY_SUN_EL, 0)));
+    }
     if(world_sunset) {
         /* Spiral Canyon: dead ahead along the start straight, the light
            from ~20 degrees up, the disc low enough for the far hills to cut
@@ -310,11 +330,13 @@ void world_build(void) {
     else if(track.id == TRACK_CANYON) build_canyon();
     else if(track.id == TRACK_TSUDOKEN) build_tsudoken();
     else if(track.id == TRACK_APPLE) build_apple();
+    else if(world_sf) build_sf();
     else if(world_lot) build_lot();
     else if(track.in_sky) build_skyway();
     else build_beach();
     surface_table_build();
     birds_build();
+    skylife_build();
     /* Release and console builds log only the first build: under dcload-ip
        each printf stalls the console with IRQs off. */
 #if defined(DK_AUTOTEST) && !defined(DK_HW)
@@ -340,12 +362,13 @@ void world_build(void) {
 void world_update(float dt) {
     world_time += dt;
 #ifdef DK_CHUNK_STATS
-    if(world_canyon || world_tk || world_av || world_lot) ck_frame();
+    if(world_canyon || world_tk || world_av || world_lot || world_sf) ck_frame();
 #endif
     if(world_lot) lot_update(dt);
     if(track.id == TRACK_HARBOUR) hb_update();
     if(track.id == TRACK_TEMPLE) th_update(dt);
     birds_update(dt);
+    skylife_update(dt);
     grandstand_update();
     /* The road's lights run forward a repeat (about 8 m) every 0.55 s. */
     if(world_canyon) sk_road_hdr = *h_canyonroad;
@@ -441,6 +464,7 @@ static void draw_chunks(int list) {
            (its pair's sphere decides, so exactly one of the two is drawn);
            the full screen only ever the detailed one. */
         if(c->lod == 3 && !world_split) continue;   /* split-screen only */
+        if(c->lod == 4 && game.state != ST_TRACKS) continue;   /* the track select's flyover only */
         if(c->lod == 1 || c->lod == 2) {
             if(!world_split) {
                 if(c->lod == 2) continue;
@@ -467,7 +491,7 @@ static void draw_chunks(int list) {
         for(int s = 0; s < c->nstrips; s++) {
             const Strip *st = &strips[c->first_strip + s];
 #ifdef DK_CHUNK_STATS
-            if((world_canyon || world_tk || world_av || world_lot) && r_sphere_visible(st->c, st->r)) {
+            if((world_canyon || world_tk || world_av || world_lot || world_sf) && r_sphere_visible(st->c, st->r)) {
                 int k = ck_kind(i);
                 ck_cam = r_cam.pos;
                 ck_strips[k]++;
@@ -496,7 +520,7 @@ static void draw_night_sky(void) {
         int n = 0;
         for(int i = 0; i <= 12; i++) {
             for(int k = 1; k >= 0; k--) {
-                V3 d = sky_dir[e + k][i];
+                V3 d = *sky_dir(&sky, e + k, i);
                 v[n++] = (RV){c.x + d.x * R, c.y + d.y * R, c.z + d.z * R, (float)i * 0.5f, v_at[e + k], 0xffffffff};
             }
         }
@@ -535,7 +559,7 @@ static void draw_sunset_sky(void) {
         int n = 0;
         for(int i = 0; i <= az; i++) {
             for(int k = 1; k >= 0; k--) {
-                V3 d = sky_dir[e + k][i];
+                V3 d = *sky_dir(&sky, e + k, i);
                 float t = 0.5f + 0.5f * (d.x * sd.x + d.z * sd.z) / fmaxf(0.01f, sqrtf(d.x * d.x + d.z * d.z));
                 v[n++] = (RV){c.x + d.x * R, c.y + d.y * R, c.z + d.z * R, 0, 0,
                               color_lerp(far_side[e + k], sun_side[e + k], t * t)};
@@ -561,22 +585,13 @@ static void draw_sky(void) {
     static const uint32_t av_cols[] = {
         0xffcedce8, 0xffcedce8, 0xffa8c8e8, 0xff74a8e2, 0xff4686d8, 0xff2a68cc, 0xff1e56c0
     };
-    const uint32_t *cols = world_av ? av_cols : day_cols;
-    const int az = 12;
-    const float R = 1500.0f;
-    V3 c = r_cam.pos;
-    r_hdr(h_sky);
-    for(int e = 0; e < 6; e++) {
-        RV v[2 * 13];
-        int n = 0;
-        for(int i = 0; i <= az; i++) {
-            for(int k = 1; k >= 0; k--) {
-                V3 d = sky_dir[e + k][i];
-                v[n++] = (RV){c.x + d.x * R, c.y + d.y * R, c.z + d.z * R, 0, 0, cols[e + k]};
-            }
-        }
-        r_strip(v, n);
-    }
+    /* Bay City Hills: a crisp blue over a pale sea haze. */
+    static const uint32_t sf_cols[] = {
+        0xffd2e0ea, 0xffd2e0ea, 0xffb0d0ec, 0xff82b6e8, 0xff5494dc, 0xff3a78d2, 0xff2c66c8
+    };
+    const uint32_t *cols = world_av ? av_cols : world_sf ? sf_cols : day_cols;
+    for(int e = 0; e < 7; e++) sky_ring_color(&sky, e, cols[e]);
+    sky_draw(&sky);
 }
 
 static uint32_t sea_color(float x, float z) {
@@ -698,7 +713,7 @@ static float sp_cell;
 typedef struct { float x, z, t, life, l; } Sparkle;
 static Sparkle sparkle[SPARKLE_N];
 static float sparkle_t;
-static uint32_t sp_seed = 0x5eaf00du;   /* its own: dk_rand drives the race */
+static uint32_t sp_seed = 0x5eaf00du;   /* its own: eng_rand drives the race */
 
 static float sp_rand(void) {
     sp_seed = sp_seed * 1664525u + 1013904223u;
@@ -792,6 +807,13 @@ static void glint_row(int j, float x0, float z0, float cell, int n) {
     }
 }
 
+/* Whether draw_sea draws water: the valley floor, the plain and the desert
+   are static scenery, and the night tracks have clouds below (the lot's
+   sea is night water). */
+static bool sea_drawn(void) {
+    return !(world_night && !world_lot) && !(world_canyon || world_tk || world_av);
+}
+
 /* Animated sea: a camera-centred grid out to ~360 m, then wide bands to
    the horizon. Only the northern half-plane is ever visible. */
 static void draw_sea(void) {
@@ -799,14 +821,14 @@ static void draw_sea(void) {
         draw_clouds_below();
         return;
     }
-    if(world_canyon || world_tk || world_av) return;   /* the valley floor, the plain and the desert are static scenery */
+    if(!sea_drawn()) return;
     const float cell = world_split ? 60.0f : 45.0f;
     const int n = world_split ? 10 : 16;
     float cx = floorf(r_cam.pos.x / cell) * cell, cz = floorf(r_cam.pos.z / cell) * cell;
     float x0 = cx - n * cell * 0.5f, z0 = cz - n * cell * 0.5f;
     float su = fmodf(world_time * 0.018f, 1.0f), sv2 = fmodf(world_time * 0.011f, 1.0f);
-    r_hdr(h_water);
-    GridColorFn fn = world_lot ? lot_sea_color : sea_color;
+    r_hdr(world_sf ? sf_water_hdr() : h_water);
+    GridColorFn fn = world_lot ? lot_sea_color : world_sf ? sf_sea_color : sea_color;
     const GridColors *gc = grid_colors(cx, cz, cell, n, x0, z0, fn);
     RV row[2 * (16 + 1)];
     uint32_t spec[2 * (16 + 1)];
@@ -839,7 +861,7 @@ static void draw_sea(void) {
     /* Horizon bands around the grid. */
     float gx0 = x0, gx1 = x0 + n * cell, gz0 = fmaxf(z0, -60.0f), gz1 = z0 + n * cell;
     const float E = 4000.0f;
-    uint32_t deep = world_lot ? lot_sea_color(0, 4000.0f) : argb(255, 96, 150, 222);
+    uint32_t deep = world_lot ? lot_sea_color(0, 4000.0f) : world_sf ? sf_sea_color(0, 4000.0f) : argb(255, 96, 150, 222);
     float uvs = 1.0f / 26.0f;
     RV q[4];
     /* north */
@@ -908,7 +930,7 @@ void world_set_fog(bool split) {
        At night it fades to the purple of the sky's horizon. */
     static int fog_mode = -1;
     int mode = (int)split | (world_night ? 2 : 0) | (world_canyon ? 4 : 0) | (world_sunset ? 8 : 0) | (world_tk ? 16 : 0) |
-               (world_av ? 32 : 0);
+               (world_av ? 32 : 0) | (world_sf ? 64 : 0);
     if(fog_mode == mode) return;
     fog_mode = mode;
     pvr_wait_ready();
@@ -920,6 +942,11 @@ void world_set_fog(bool split) {
         /* The desert's pale haze, the sky's horizon. */
         pvr_fog_table_color(1.0f, 206 / 255.0f, 220 / 255.0f, 232 / 255.0f);
         pvr_set_bg_color(206 / 255.0f, 220 / 255.0f, 232 / 255.0f);
+    }
+    else if(world_sf) {
+        /* The bay's haze, the sky's pale horizon. */
+        pvr_fog_table_color(1.0f, 210 / 255.0f, 224 / 255.0f, 234 / 255.0f);
+        pvr_set_bg_color(210 / 255.0f, 224 / 255.0f, 234 / 255.0f);
     }
     else if(world_tk && TK_AFTERNOON) {
         /* The day sky's horizon: a light blue haze. */
@@ -947,9 +974,10 @@ void world_set_fog(bool split) {
     /* The two open plains: a haze from close in. Tsudoken's is light, so
        the cherry trees keep their pink, and the desert has only a thin
        heat haze over the sand. */
-    if(world_tk || world_av) {
+    if(world_tk || world_av || world_sf) {
         float k = split ? 0.5f : 1.0f;
         if(world_tk) fog_table_octaves(50.0f * k, 1100.0f * k, 0.85f);
+        else if(world_sf) fog_table_octaves(40.0f * k, 1000.0f * k, 0.6f);
         else fog_table_octaves(30.0f * k, 900.0f * k, 0.45f);
         return;
     }
@@ -961,22 +989,26 @@ void world_set_fog(bool split) {
 
 /* True where p is in solid scenery, or less than margin metres from it:
    Spiral Canyon's rock (not a tunnel's bore), Tsudoken's ground, raised
-   road, barriers and props. For keeping the spectator's cameras and their
+   road, barriers and props, Bay City Hills' buildings. For keeping the spectator's cameras and their
    sight lines clear of it; other tracks have none. */
 bool world_solid(V3 p, float margin) {
     if(world_lot) return roam_solid(p, margin);
     if(world_tk) return tk_in_solid(p, margin);
+    if(world_sf) return sf_in_solid(p, margin + 3.0f);   /* a camera that close sees only a roof or a wall */
     return world_canyon && dr_in_rock(p, margin);
 }
 
-/* True when nothing solid stands between a and b (world_solid). */
+/* True when nothing solid stands between a and b (world_solid). On Bay
+   City Hills the hills count too: the ground hugs the road, so a crest
+   hides what is climbing up the far side of it. */
 bool world_sight_clear(V3 a, V3 b) {
     if(world_tk) return tk_sight_clear(a, b);
-    if(!world_canyon && !world_lot) return true;
+    if(!world_canyon && !world_lot && !world_sf) return true;
     int steps = (int)(vlen(vsub(b, a)) / 2.0f);
     for(int i = 1; i < steps; i++) {
         V3 p = vlerp(a, b, (float)i / steps);
-        if(world_lot ? roam_solid(p, 0.3f) : dr_in_rock(p, 0.3f)) return false;
+        if(world_sf && p.y < sf_terrain(p.x, p.z) - 0.3f) return false;
+        if(world_lot ? roam_solid(p, 0.3f) : world_sf ? sf_in_solid(p, 0.3f) : dr_in_rock(p, 0.3f)) return false;
     }
     return true;
 }
@@ -995,9 +1027,14 @@ void world_draw_op(void) {
         PROF_LAP(PS_CHUNKS, pm);
         draw_dash_pads();
         if(world_av) av_draw_windsock();
+        if(world_sf) {
+            sf_draw_cablecar();
+            sf_draw_ferry();
+        }
         if(track.id == TRACK_HARBOUR) hb_draw_op();
         if(track.id == TRACK_TEMPLE) th_draw_op();
         birds_draw();
+        skylife_draw_op();
     }
 }
 
@@ -1100,6 +1137,9 @@ static void draw_clouds_and_mountains(void) {
     else if(world_av) {
         av_draw_ranges();   /* the brown mountain was drawn with the opaque scenery */
     }
+    else if(world_sf) {
+        sf_draw_ranges();
+    }
     else {
         /* Distant mountains ring. */
         r_hdr(h_mount);
@@ -1173,7 +1213,7 @@ static void draw_clouds_and_mountains(void) {
     if(world_tk || world_sunset) return;
 
     /* The sun. */
-    V3 sp = vmad(c, world_sun_dir, 1300.0f);
+    V3 sp = vmad(c, sun_disc_dir, 1300.0f);
     if(r_sphere_visible(sp, 200.0f)) {
         r_hdr(h_glow_add);
         r_billboard(sp, 210.0f, 210.0f, 0, 0, 0, 1, 1, argb(200, 255, 250, 210));
@@ -1184,20 +1224,14 @@ static void draw_clouds_and_mountains(void) {
 /* Lens flare ghosts along the line from the sun through the screen centre. */
 static void draw_lens_flare(void) {
     if(world_sunset) return;   /* the sun is low and ahead: it would flare through the tunnels */
-    V3 sp = vmad(r_cam.pos, sun_disc_dir, 1300.0f);
-    float sx, sy, w;
-    if(!r_project(sp, &sx, &sy, &w)) return;
-    if(sx < -40 || sx > 680 || sy < -40 || sy > 520) return;
+    float sx, sy;
+    if(!sky_sun_screen(sun_disc_dir, 1300.0f, &sx, &sy)) return;
     float edge = clampf(1.0f - fmaxf(fabsf(sx - 320) / 380.0f, fabsf(sy - 240) / 300.0f), 0, 1);
-    static const float pos[] = {0.35f, 0.62f, 1.0f, 1.35f, 1.7f};
-    static const float size[] = {44, 22, 64, 30, 90};
-    static const uint32_t col[] = {0xffffd090, 0xff90ffb0, 0xff80c0ff, 0xffffa0e0, 0xffa0d0ff};
-    r_hdr(h_flare);
-    for(int i = 0; i < 5; i++) {
-        float x = sx + (320 - sx) * pos[i] * 2.0f, y = sy + (240 - sy) * pos[i] * 2.0f;
-        float s = size[i];
-        r_quad2d(x - s, y - s, x + s, y + s, 0, 0, 1, 1, color_alpha(col[i], 0.35f * edge), 9.0f);
-    }
+    static const SkyGhost ghosts[] = {
+        {0.7f, 44, 0xffffd090, 0, 1}, {1.24f, 22, 0xff90ffb0, 0, 1}, {2.0f, 64, 0xff80c0ff, 0, 1},
+        {2.7f, 30, 0xffffa0e0, 0, 1}, {3.4f, 90, 0xffa0d0ff, 0, 1},
+    };
+    sky_flare(sx, sy, h_flare, ghosts, 5, 0.35f * edge, 9.0f);
 }
 
 /* Open water there, deep enough that a sparkle can't poke up through the
@@ -1224,8 +1258,11 @@ static bool sea_open(float x, float z) {
 }
 
 static void draw_sea_sparkles(void) {
-    /* One view's candidates at a time: split screen keeps the sheen only. */
-    if(world_split) return;
+    /* One view's candidates at a time: split screen keeps the sheen only.
+       Only where there is a sea: the candidates are the last sea pass's,
+       and a track without one would keep spawning stars from a previous
+       track's, hovering over Spiral Canyon's floor and the desert. */
+    if(world_split || !sea_drawn()) return;
     float dt = clampf(world_time - sparkle_t, 0, 0.1f);
     sparkle_t = world_time;
     V3 c = r_cam.pos;
@@ -1271,6 +1308,10 @@ void world_draw_tr(void) {
     /* Far out in the desert, so straight after the sky (the list draws in
        the order sent). */
     if(world_av && !(dk_probe_off & PROBE_DISTANT)) av_draw_dust_devils();
+    if(world_sf && !(dk_probe_off & PROBE_DISTANT)) {
+        sf_draw_fog();
+        sf_draw_ferry_wake();
+    }
     if(dk_probe_off & PROBE_FOAM) {
         if(!(dk_probe_off & PROBE_DISTANT) && !world_night) draw_lens_flare();
         return;
@@ -1279,6 +1320,7 @@ void world_draw_tr(void) {
         /* Neon glows are additive, so they need no sorting. */
         if(!(dk_probe_off & PROBE_WORLD)) draw_chunks(HF_TR);
         draw_sparkles();
+        skylife_draw_tr();
         dr_draw_waterfalls();
     }
     PROF_BEGIN(pm);

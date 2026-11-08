@@ -1,9 +1,10 @@
-/* HUD and 2D text. The font atlas holds white glyphs with a navy outline,
-   tinted by vertex colour; the countdown lettering is pre-styled. */
+/* HUD and 2D text. The font atlas (font_metrics.h, drawn by the engine's
+   text module) holds white glyphs with a navy outline, tinted by vertex
+   colour; the countdown lettering is pre-styled. */
 #include "hud.h"
 #include "audio.h"
 #include "kart.h"
-#include "render.h"
+#include "engine/render.h"
 #include "track.h"
 #include "fx.h"
 #include "items.h"
@@ -11,8 +12,10 @@
 #include "texture_assets.h"
 #include "font_metrics.h"
 #include "ui.h"
+#include "save.h"
 
 static const pvr_poly_hdr_t *h_font, *h_big, *h_flat, *h_glow;
+static EngFont font;
 static struct {
     char msg_text[32];
     uint32_t msg_col;
@@ -28,6 +31,9 @@ static float toast_t;
 
 void hud_init(void) {
     h_font = r_header(TEX_FONT, HF_TR | HF_NOFOG | HF_NOZTEST | HF_CLAMP);
+    _Static_assert(sizeof(dk_glyph_t) == sizeof(eng_glyph_t), "font_metrics.h glyph layout");
+    font = (EngFont){h_font, (const eng_glyph_t *)font_glyphs, FONT_ROW_H, FONT_TEX_W, FONT_TEX_H, FONT_CAP_TOP,
+                     FONT_CAP_BOTTOM};
     h_big = r_header(TEX_BIGTEXT, HF_TR | HF_NOFOG | HF_NOZTEST | HF_CLAMP);
     h_flat = r_header(TEX_NONE, HF_TR | HF_NOFOG | HF_NOZTEST);
     h_glow = r_header(TEX_GLOW, HF_TR | HF_ADD | HF_NOFOG | HF_NOZTEST);
@@ -46,51 +52,24 @@ void hud_update(float dt) {
     }
 }
 
-float hud_text_width(const char *s, float scale) {
-    float w = 0;
-    for(; *s; s++) {
-        unsigned c = (unsigned char)*s;
-        if(c < 32 || c > 127) c = '?';
-        w += font_glyphs[c - 32].adv * scale;
-    }
-    return w;
+const EngFont *hud_font(void) {
+    return &font;
 }
 
-static void text_run(float x, float y, float scale, uint32_t col, const char *s) {
-    r_hdr(h_font);
-    const float du = 1.0f / FONT_TEX_W, dv = (float)FONT_ROW_H / FONT_TEX_H;
-    for(; *s; s++) {
-        unsigned c = (unsigned char)*s;
-        if(c < 32 || c > 127) c = '?';
-        const dk_glyph_t *g = &font_glyphs[c - 32];
-        if(g->w) {
-            float x0 = x + g->ox * scale, u0 = g->x * du, v0 = g->row * dv;
-            r_quad2d(x0, y, x0 + g->w * scale, y + FONT_ROW_H * scale, u0, v0, u0 + g->w * du, v0 + dv, col, 20.0f);
-        }
-        x += g->adv * scale;
-    }
+float hud_text_width(const char *s, float scale) {
+    return text_width(&font, s, scale);
 }
 
 void hud_text(float x, float y, float scale, int align, uint32_t col, const char *s) {
-    float w = hud_text_width(s, scale);
-    if(align == ALIGN_CENTER) x -= w * 0.5f;
-    else if(align == ALIGN_RIGHT) x -= w;
-    text_run(x, y, scale, col, s);
+    text_draw(&font, x, y, scale, align, col, s);
 }
 
 void hud_text_c(float x, float cy, float scale, int align, uint32_t col, const char *s) {
-    hud_text(x, cy - (FONT_CAP_TOP + FONT_CAP_BOTTOM) * 0.5f * scale, scale, align, col, s);
+    text_draw_c(&font, x, cy, scale, align, col, s);
 }
 
 void hud_letter_c(float cx, float cy, float scale, uint32_t col, char c) {
-    /* Centre the glyph's atlas rect, not its advance: a capital's rect
-       (outline and all) runs wider than its pen advance, so advance
-       centring lands the letter right of a button's middle. */
-    unsigned i = (unsigned char)c;
-    if(i < 32 || i > 127) i = '?';
-    const dk_glyph_t *g = &font_glyphs[i - 32];
-    char s[2] = {(char)i, 0};
-    hud_text_c(cx - (g->ox + g->w * 0.5f) * scale, cy, scale, ALIGN_LEFT, col, s);
+    text_letter_c(&font, cx, cy, scale, col, c);
 }
 
 void hud_panel(float x0, float y0, float x1, float y1, uint32_t top, uint32_t bottom, float z) {
@@ -159,8 +138,53 @@ void hud_lap_popup(int player, int lap, float time, bool best) {
     pm[player].lap_best = best;
 }
 
+/* The maps are drawn round the world's origin at a scale that fits every
+   course laid out within MAP_HX by MAP_HZ metres of it. One that reaches
+   further (Bay City Hills) is centred on its own bounds and shrunk to
+   that size instead. */
+#define MAP_HX 180.0f
+#define MAP_HZ 131.0f
+static int fit_id = -1;
+static float fit_len, fit_hx, fit_hz;
+
+static void map_fit(float *cx, float *cy, float *sc) {
+    static float ox, oz, k = 1.0f;
+    if(fit_id != track.id || fit_len != track.length) {
+        fit_id = track.id;
+        fit_len = track.length;
+        float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+        for(int i = 0; i < TRACK_SAMPLES; i++) {
+            V3 p = track.smp[i].p;
+            x0 = fminf(x0, p.x - 9.0f);
+            x1 = fmaxf(x1, p.x + 9.0f);
+            z0 = fminf(z0, p.z - 9.0f);
+            z1 = fmaxf(z1, p.z + 9.0f);
+        }
+        ox = oz = 0.0f;
+        k = 1.0f;
+        if(fmaxf(-x0, x1) > MAP_HX + 9.0f || fmaxf(-z0, z1) > MAP_HZ + 9.0f) {
+            ox = 0.5f * (x0 + x1);
+            oz = 0.5f * (z0 + z1);
+            k = fminf(1.0f, fminf((MAP_HX + 9.0f) / (0.5f * (x1 - x0)), (MAP_HZ + 9.0f) / (0.5f * (z1 - z0))));
+        }
+        /* How far it reaches from the map's centre, as drawn (k applied). */
+        fit_hx = k * fmaxf(x1 - ox, ox - x0);
+        fit_hz = k * fmaxf(z1 - oz, oz - z0);
+    }
+    *sc *= k;
+    *cx -= ox * *sc;
+    *cy += oz * *sc;
+}
+
+float hud_track_map_fit(float sc, float half_w, float half_h) {
+    float cx = 0, cy = 0, s1 = 1.0f;
+    map_fit(&cx, &cy, &s1);   /* brings fit_hx and fit_hz up to date */
+    return fminf(sc, fminf(half_w / fit_hx, half_h / fit_hz));
+}
+
 void hud_draw_track_map(float cx, float cy, float sc, float z, bool show_karts) {
     r_hdr(h_flat);
+    if(!track_is_roam()) map_fit(&cx, &cy, &sc);
     /* Free Roam: the lot inside the ring road, where everyone actually is. */
     if(track_is_roam()) {
         float hx = (LOT_HX - 9.0f) * sc, hz = (LOT_HZ - 9.0f) * sc;
@@ -205,36 +229,13 @@ void hud_draw_track_map(float cx, float cy, float sc, float z, bool show_karts) 
     }
 }
 
-/* Free Roam's corner: no laps or places, a FREE ROAM tag with the speed,
-   the time on the lot on the right. */
-static void draw_roam_corner(int pi, float y0, float y1) {
-    const Kart *p = &karts[game.pl[pi].kart];
-    bool split = y1 - y0 < 400.0f;
-    float k = split ? 0.72f : 1.0f;
+/* The slide's score counting up in its stage colour, centred at sy, then
+   the score just banked for a couple of seconds (gold when it is a new
+   best). Callers put it over the charge gauge, where the eye is while
+   drifting; a split screen's kart sits there, so top centre of the view
+   instead. */
+static void draw_drift_score(const Kart *p, float sy, float k) {
     char buf[32];
-    /* Two panels of one size: the mode and speed, the best drift under
-       it, labels and readings at matching scales. No clock: nothing is
-       being timed. */
-    const float box_h = 40 * k, pad = 12 * k, gap = 6 * k, ls = 0.62f * k, vs = 0.8f * k;
-    float lx = split ? 14 : 24, ly = y0 + (split ? 8 : 22);
-    float label_w = fmaxf(hud_text_width("FREE ROAM", ls), hud_text_width("BEST DRIFT", ls));
-    float val_w = fmaxf(hud_text_width("999 MPH", vs), hud_text_width("99999", vs));
-    float lw = pad + label_w + 10 * k + val_w + pad;
-    const char *labels[2] = {"FREE ROAM", "BEST DRIFT"};
-    for(int row = 0; row < 2; row++) {
-        float ry = ly + row * (box_h + gap), cy = ry + box_h * 0.5f;
-        hud_panel(lx, ry, lx + lw, ry + box_h, argb(150, 20, 60, 160), argb(150, 10, 30, 90), 15);
-        hud_text_c(lx + pad, cy + 1.0f * k, ls, ALIGN_LEFT, argb(255, 255, 220, 80), labels[row]);
-        if(row == 0) snprintf(buf, sizeof(buf), "%d MPH", (int)(fabsf(p->speed) * 2.23694f + 0.5f));
-        else snprintf(buf, sizeof(buf), "%d", (int)p->best_drift);
-        hud_text_c(lx + lw - pad, cy, vs, ALIGN_RIGHT, 0xffffffff, buf);
-    }
-    if(split) hud_text_c(lx + lw + 10 * k, ly + box_h * 0.5f, 0.75f * k, ALIGN_LEFT, p->ui_color | 0xff000000, pi ? "P2" : "P1");
-    /* The slide's score counting up in its stage colour, centred over
-       the charge gauge where the eye is while drifting (a split screen's
-       kart sits there, so top centre of the view instead), then the score
-       just banked for a couple of seconds (gold when it is a new best). */
-    float sy = split ? ly + box_h * 0.5f : 440 - 22 * k;
     if(p->drift == DRIFT_ACTIVE && p->drift_score >= 1.0f) {
         uint32_t c = p->stage ? fx_stage_color(p->stage) : argb(255, 240, 240, 240);
         snprintf(buf, sizeof(buf), "DRIFT %d", (int)p->drift_score);
@@ -246,6 +247,35 @@ static void draw_roam_corner(int pi, float y0, float y1) {
         snprintf(buf, sizeof(buf), p->drift_best_new ? "NEW BEST %d" : "DRIFT %d", (int)p->last_drift);
         hud_text_c(320, sy, 0.9f * k, ALIGN_CENTER, color_alpha(c, a), buf);
     }
+}
+
+/* Free Roam's corner: no laps or places, a FREE ROAM tag with the speed,
+   the time on the lot on the right. */
+static void draw_roam_corner(int pi, float y0, float y1) {
+    const Kart *p = &karts[game.pl[pi].kart];
+    bool split = y1 - y0 < 400.0f;
+    float k = split ? 0.72f : 1.0f;
+    char buf[32];
+    /* Two panels of one size: the mode and speed, the best drift under
+       it (unless Settings has the drift counter off), labels and readings
+       at matching scales. No clock: nothing is being timed. */
+    bool drifts = save.drift_show != DRIFT_SHOW_OFF;
+    const float box_h = 40 * k, pad = 12 * k, gap = 6 * k, ls = 0.62f * k, vs = 0.8f * k;
+    float lx = split ? 14 : 24, ly = y0 + (split ? 8 : 22);
+    float label_w = fmaxf(hud_text_width("FREE ROAM", ls), hud_text_width("BEST DRIFT", ls));
+    float val_w = fmaxf(hud_text_width("999 MPH", vs), hud_text_width("99999", vs));
+    float lw = pad + label_w + 10 * k + val_w + pad;
+    const char *labels[2] = {"FREE ROAM", "BEST DRIFT"};
+    for(int row = 0; row < (drifts ? 2 : 1); row++) {
+        float ry = ly + row * (box_h + gap), cy = ry + box_h * 0.5f;
+        hud_panel(lx, ry, lx + lw, ry + box_h, argb(150, 20, 60, 160), argb(150, 10, 30, 90), 15);
+        hud_text_c(lx + pad, cy + 1.0f * k, ls, ALIGN_LEFT, argb(255, 255, 220, 80), labels[row]);
+        if(row == 0) snprintf(buf, sizeof(buf), "%d MPH", (int)(fabsf(p->speed) * 2.23694f + 0.5f));
+        else snprintf(buf, sizeof(buf), "%d", (int)p->best_drift);
+        hud_text_c(lx + lw - pad, cy, vs, ALIGN_RIGHT, 0xffffffff, buf);
+    }
+    if(split) hud_text_c(lx + lw + 10 * k, ly + box_h * 0.5f, 0.75f * k, ALIGN_LEFT, p->ui_color | 0xff000000, pi ? "P2" : "P1");
+    if(drifts) draw_drift_score(p, split ? ly + box_h * 0.5f : 440 - 22 * k, k);
 }
 
 void hud_draw_race(int pi, float y0, float y1) {
@@ -305,6 +335,9 @@ void hud_draw_race(int pi, float y0, float y1) {
         hud_text(px, py, 2.4f * k * pulse, ALIGN_RIGHT, c, buf);
         hud_text(px + 2, py + 24 * k, 1.0f * k, ALIGN_LEFT, c, hud_ordinal(p->place));
     }
+
+    /* The drift score outside Free Roam, when Settings asks for it. */
+    if(save.drift_show == DRIFT_SHOW_ALWAYS && !p->finished) draw_drift_score(p, split ? y0 + 30 * k : 440 - 22 * k, k);
 
 common:
     if(!split) hud_draw_track_map(98, 402, track_is_roam() ? 0.34f : 0.40f, 18.0f, true);

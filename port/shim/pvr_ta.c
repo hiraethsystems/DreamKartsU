@@ -530,6 +530,11 @@ int pvr_wait_ready(void) {
     return 0;
 }
 
+/* The PVR drew from texture memory after the CPU let go of a frame; here
+   the backends have read what they need by the time backend_draw returns
+   (they convert on upload), so there is nothing to wait for. */
+int pvr_wait_render_done(void) { return 0; }
+
 void pvr_shim_report(uint64_t render_us, size_t vtx_bytes) {
     stats.rnd_last_time = render_us;
     (void)vtx_bytes;

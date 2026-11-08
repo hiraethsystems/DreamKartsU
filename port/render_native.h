@@ -4,7 +4,7 @@
 #ifndef DKU_RENDER_NATIVE_H
 #define DKU_RENDER_NATIVE_H
 
-#include "render.h"
+#include "engine/render.h"
 
 void dku_native_strip(const RV *v, const uint32_t *spec, int n);
 /* v, or kv coloured col[group] with u = v = 0. */

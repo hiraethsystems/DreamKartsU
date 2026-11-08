@@ -3,12 +3,13 @@
 #define DK_HUD_H
 
 #include "dk.h"
-
-enum { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT };
+#include "engine/text.h"
 
 void hud_init(void);
 void hud_reset(void);
 void hud_update(float dt);
+/* The HUD font (engine/text.h), for text drawn elsewhere. */
+const EngFont *hud_font(void);
 float hud_text_width(const char *s, float scale);
 void hud_text(float x, float y, float scale, int align, uint32_t col, const char *s);
 /* The same with the capitals (and digits) centred on cy rather than the
@@ -31,6 +32,9 @@ void hud_draw_split_overlay(void);
 /* Track outline centred on (cx, cy) at sc pixels per metre; z orders it
    among other overlay quads. Karts are drawn on top when asked. */
 void hud_draw_track_map(float cx, float cy, float sc, float z, bool show_karts);
+/* The scale for the current track's map, no larger than sc, that keeps it
+   within half_w by half_h pixels of its centre. */
+float hud_track_map_fit(float sc, float half_w, float half_h);
 /* Results after a single race, time trial or versus, with the menu of what
    to do next. */
 enum { RESULTS_AGAIN, RESULTS_TRACK, RESULTS_TITLE, RESULTS_ITEMS };

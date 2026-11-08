@@ -11,7 +11,7 @@
    What render.c still decides stays there: headers, which strips to draw
    at all (its bounding spheres), the viewport and split screen (the TA's
    user clip, a scissor here). */
-#include "render.h"
+#include "engine/render.h"
 #include "render_native.h"
 #include "ta.h"
 #include <sh4zam/shz_sh4zam.h>

@@ -16,10 +16,11 @@
    triggers) and the kart (left/right), and hide the overlay (Y) for a
    clean picture. */
 #include "spectate.h"
+#include "engine/qa.h"
 #include "hud.h"
 #include "kart.h"
 #include "net.h"
-#include "render.h"
+#include "engine/render.h"
 #include "track.h"
 #include "world.h"
 #include <stdlib.h>
@@ -112,7 +113,7 @@ static void add_cam(float s, float side, float extra, float h, float hand) {
 
 /* How much of the road a camera covers (len metres up to from + len) it
    can see past solid scenery (world_solid: Spiral Canyon's rock,
-   Tsudoken's ramp and props), nothing if it stands in it, and which
+   Tsudoken's ramp and props, Bay City Hills' buildings), nothing if it stands in it, and which
    ROCK_SEG metre pieces of it are hidden (a bit each). */
 static float sight_view(V3 p, float from, float len, uint32_t *hidden) {
     *hidden = 0xffffffffu;
@@ -134,7 +135,7 @@ static float sight_view(V3 p, float from, float len, uint32_t *hidden) {
    across to the other side, or along the road. What none can see (a
    tunnel's depths) the director films from the chase camera instead. */
 static void clear_view(TvCam *c, float from, float len) {
-    if(track.id != TRACK_CANYON && track.id != TRACK_TSUDOKEN) return;
+    if(track.id != TRACK_CANYON && track.id != TRACK_TSUDOKEN && track.id != TRACK_SF) return;
     float best = sight_view(c->pos, from, len, &c->hidden);
     if(best > 0.999f) return;
     V3 o = track_point(c->s, 0), r = vsub(track_point(c->s, 1), o);
@@ -146,20 +147,23 @@ static void clear_view(TvCam *c, float from, float len) {
         const TrackSample *t = sample_at(s);
         float out[3] = {fabsf(d0), t->half + t->curb + 2.0f, t->half - 1.0f};
         for(int side = 0; side < 2 && best < 0.999f; side++)
-            for(int w = 0; w < 3 && best < 0.999f; w++)
-                for(int h = 0; h < 4 && best < 0.999f; h++) {
-                    float d = (side ? -1.0f : 1.0f) * (d0 < 0 ? -out[w] : out[w]);
-                    V3 p = track_point(s, d);
-                    p.y = track_road_y(s, clampf(d, -t->half, t->half)) + (w == 2 ? 3.5f : rise0) + rise[h];
-                    uint32_t hid;
-                    float v = sight_view(p, from, len, &hid);
-                    if(v > best + 0.01f) {
-                        best = v;
-                        c->pos = p;
-                        c->s = s;
-                        c->hidden = hid;
-                    }
+            for(int i = 0; i < 12 && best < 0.999f; i++) {
+                /* Bay City Hills tries in over the road at each height
+                   before rising: risen over the houses, a camera looks
+                   across a roof that cuts the picture. */
+                int w = track.id == TRACK_SF ? i % 3 : i / 4, h = track.id == TRACK_SF ? i / 3 : i % 4;
+                float d = (side ? -1.0f : 1.0f) * (d0 < 0 ? -out[w] : out[w]);
+                V3 p = track_point(s, d);
+                p.y = track_road_y(s, clampf(d, -t->half, t->half)) + (w == 2 ? 3.5f : rise0) + rise[h];
+                uint32_t hid;
+                float v = sight_view(p, from, len, &hid);
+                if(v > best + 0.01f) {
+                    best = v;
+                    c->pos = p;
+                    c->s = s;
+                    c->hidden = hid;
                 }
+            }
     }
 #ifdef DK_AUTOTEST
     printf("DK SPECTATE: camera moved clear of the scenery to s %.0f (%.0f, %.0f, %.0f), sees %.0f%%\n", (double)c->s,
@@ -309,16 +313,16 @@ static void new_shot(void) {
     static const int weights[CAM_MODES] = {0, 40, 18, 17, 13, 12};
     int mode;
     do {
-        int r = (int)(dk_rand() % 100), acc = 0;
+        int r = (int)(eng_rand() % 100), acc = 0;
         for(mode = CAM_TV; mode < CAM_MODES - 1; mode++) {
             acc += weights[mode];
             if(r < acc) break;
         }
     } while(mode == shot_mode && mode != CAM_TV);
-    int pick = (int)(dk_rand() % 100), b = battle();
+    int pick = (int)(eng_rand() % 100), b = battle();
     int k = front_runner();
     if(pick >= 55 && pick < 90 && b >= 0) k = b;
-    else if(pick >= 90) k = placed(1 + (int)(dk_rand() % kart_count));
+    else if(pick >= 90) k = placed(1 + (int)(eng_rand() % kart_count));
     static const float lo[CAM_MODES] = {0, 10, 6, 7, 5, 5}, hi[CAM_MODES] = {0, 16, 9, 10, 7, 7};
     shot_mode = mode;
     shot_len = rangef(lo[mode], hi[mode]);
@@ -380,11 +384,11 @@ static void autotest(float dt) {
     t += dt;
     if(game.state == ST_COUNTDOWN && game.countdown > 1.5f && !s_grid) {
         s_grid = saw_grid = true;
-        printf("DK SHOT watch-grid\n");
+        qa_shot("watch-grid");
     }
     if(game.state == ST_RESULTS && game.time > 1.5f && !s_results) {
         s_results = true;
-        printf("DK SHOT watch-results\n");
+        qa_shot("watch-results");
     }
     if(game.state == ST_RACE && game.race_time > next && presses < CAM_MODES) {
         next = game.race_time + 7.0f;
@@ -398,7 +402,7 @@ static void autotest(float dt) {
     static float shot_at[CAM_MODES];
     if(game.state == ST_RACE && shot_t > 2.5f && shot_at[shot_mode] == 0 && game.race_time > 6.0f) {
         shot_at[shot_mode] = game.race_time;
-        printf("DK SHOT watch-%s\n", mode_names[shot_mode]);
+        qa_shot("watch-%s", mode_names[shot_mode]);
     }
 }
 #endif
@@ -513,7 +517,7 @@ static void update(float dt) {
             cut = true;
         }
         if(target_pick >= 0) set_target(target_pick);
-        else if(mode_pick != CAM_AUTO) set_target((dk_rand() % 3) ? front_runner() : (battle() >= 0 ? battle() : front_runner()));
+        else if(mode_pick != CAM_AUTO) set_target((eng_rand() % 3) ? front_runner() : (battle() >= 0 ? battle() : front_runner()));
     }
     /* Down a tunnel no trackside camera sees the kart: chase it through. */
     float ts = karts[shot_target].tp.s;
@@ -529,10 +533,7 @@ static void update(float dt) {
 /* Cameras                                                             */
 
 static void basis(Camera *c, V3 pos, V3 look, float fov) {
-    c->pos = pos;
-    c->fwd = vnorm(vsub(look, pos));
-    c->right = vnorm(vcross(v3(0, 1, 0), c->fwd));
-    c->up = vcross(c->fwd, c->right);
+    cam_look_at(c, pos, look);
     c->fov = fov;
     c->shake = 0;
 }
@@ -601,6 +602,8 @@ static void heli_shot(Camera *cam, const Kart *k, float dt) {
     heli_a += dt * 0.16f;
     float a = k->heading + DK_PI + sinf(heli_a) * 0.9f;
     V3 pos = vadd(k->pos, v3(sinf(a) * 24.0f, 15.0f, cosf(a) * 24.0f));
+    /* Over the rooftops rather than through them (frame eases the climb). */
+    for(int i = 0; i < 8 && world_solid(pos, 1.0f); i++) pos.y += 4.0f;
     V3 look = vmad(k->pos, heading_fwd(k->heading), 5.0f);
     frame(cam, pos, look, 0.95f, 1.6f, 4.0f, dt);
 }

@@ -38,13 +38,22 @@ merge_dir() { # <monorepo path> <local dir>
     done
     # Files upstream deleted.
     (cd "$work/base/$2" && find . -type f) | while read -r f; do
-        [ -e "$work/new/$2/$f" ] || { echo "upstream removed $2/$f"; rm -f "$2/$f"; }
+        [ -e "$work/new/$2/$f" ] && continue
+        # A file upstream moved takes the port's edits with it: say so, as
+        # the engine move (af4eb66) did to render.c and prof.h.
+        if grep -q 'DKU' "$2/$f" 2>/dev/null; then
+            echo "$2/$f (removed upstream, had DKU edits: re-apply where it went)" >>"$work/lost"
+        fi
+        echo "upstream removed $2/$f"; rm -f "$2/$f"
     done
 }
 merge_dir projects/games/dreamkarts upstream
 merge_dir projects/common upstream_common
 git -C "$work/dc" show "$NEWSHA:tools/update-sh4zam.sh" | grep -m1 'SH4ZAM_COMMIT="'
 
+if [ -s "$work/lost" ]; then
+    echo "EDITS TO RE-APPLY:"; cat "$work/lost"
+fi
 if [ -s "$work/conflicts" ]; then
     echo "CONFLICTS:"; cat "$work/conflicts"; exit 1
 fi

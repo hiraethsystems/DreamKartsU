@@ -4,15 +4,17 @@
    a track select that flies over each course as it is picked. Two players
    pick their karts side by side on a split-screen kart select, each with
    their own pad. The main menu's Settings page holds the sound test, the
-   online name, the music switch and the Customize screen, where the player
-   paints a kart of their own and watches it change. */
+   online name, the music switch, the drift counter and the Customize
+   screen, where the player paints a kart of their own and watches it
+   change. */
 #include "title.h"
+#include "engine/qa.h"
 #include "flappy.h"
 #include "audio.h"
 #include "hud.h"
 #include "kart.h"
 #include "models.h"
-#include "render.h"
+#include "engine/render.h"
 #include "save.h"
 #include "track.h"
 #include "online.h"
@@ -57,9 +59,9 @@ static int main_step(int row, int dir) {
 }
 
 /* Settings: a page of the main menu (the backdrop stays put) opening the
-   sound test, the online name entry, the music switch and volume, and the
-   Customize screen. */
-enum { SET_SOUND, SET_NAME, SET_MUSIC, SET_VOLUME, SET_CUSTOM, SET_ROWS };
+   sound test, the online name entry, the music switch and volume, where the
+   drift counter shows, and the Customize screen. */
+enum { SET_SOUND, SET_NAME, SET_MUSIC, SET_VOLUME, SET_DRIFT, SET_CUSTOM, SET_ROWS };
 static bool settings_open;
 static float settings_slide;
 static int settings_row;
@@ -141,6 +143,17 @@ static void music_toggle(void) {
     audio_music_enable(save.music);
     save_store();
     audio_sfx(DK_SFX_MENU_MOVE, 200, 128);
+}
+
+/* Off, Free Roam, Always: left and right step (stopping at the ends), A
+   cycles. */
+static void drift_step(int dir, bool wrap) {
+    int m = save.drift_show + dir;
+    if(wrap) m = (m + DRIFT_SHOW_COUNT) % DRIFT_SHOW_COUNT;
+    if(m < 0 || m >= DRIFT_SHOW_COUNT) return;
+    save.drift_show = m;
+    save_store();
+    audio_sfx(DK_SFX_MENU_MOVE, 200, dir < 0 ? 90 : 166);
 }
 
 static void custom_apply(void) {
@@ -230,6 +243,10 @@ static void settings_update(void) {
         music_toggle();
         return;
     }
+    if(settings_row == SET_DRIFT && (input_menu_left() || input_menu_right())) {
+        drift_step(input_menu_left() ? -1 : 1, false);
+        return;
+    }
     if(settings_row == SET_VOLUME && (input_menu_left() || input_menu_right())) {
         int v = save.volume + (input_menu_left() ? -1 : 1);
         if(v >= 0 && v <= SAVE_VOLUME_MAX) {
@@ -249,6 +266,10 @@ static void settings_update(void) {
     if(!(pad.pressed & (BTN_A | BTN_START))) return;
     if(settings_row == SET_MUSIC) {
         music_toggle();
+        return;
+    }
+    if(settings_row == SET_DRIFT) {
+        drift_step(1, true);
         return;
     }
     if(settings_row == SET_VOLUME) return;
@@ -405,7 +426,7 @@ typedef struct {
 enum {
     C_MAIN = 1, C_ROW_SETTINGS, C_SETTINGS, C_ROW_MUSIC, C_MUSIC_OFF, C_ROW_CUSTOM, C_CUSTOM, C_BODY, C_ROW_TRIM,
     C_TRIM, C_ROW_CHAO, C_CHAO, C_ROW_SAVE, C_SAVED, C_ROW_SINGLE, C_MENU, C_ROW_COLOUR, C_LIME, C_IS_CUSTOM,
-    C_ROW_NAME, C_NAME_SCREEN, C_BACK_ON_NAME, C_SAVED_LOOK, C_SOUND, C_NOT_SOUND, C_ROW_VOLUME, C_VOL_6
+    C_ROW_NAME, C_NAME_SCREEN, C_BACK_ON_NAME, C_SAVED_LOOK, C_SOUND, C_NOT_SOUND, C_ROW_VOLUME, C_VOL_6, C_ROW_DRIFT, C_DRIFT_OFF, C_DRIFT_ALL
 };
 
 static bool at_cond(int c) {
@@ -420,6 +441,9 @@ static bool at_cond(int c) {
         case C_MUSIC_OFF: return !save.music && !audio_music_enabled();
         case C_ROW_VOLUME: return settings_row == SET_VOLUME;
         case C_VOL_6: return save.volume == 6;
+        case C_ROW_DRIFT: return settings_row == SET_DRIFT;
+        case C_DRIFT_OFF: return save.drift_show == DRIFT_SHOW_OFF;
+        case C_DRIFT_ALL: return save.drift_show == DRIFT_SHOW_ALWAYS;
         case C_ROW_CUSTOM: return settings_row == SET_CUSTOM;
         case C_CUSTOM: return custom_open;
         case C_BODY: return edit.body == 3;
@@ -452,6 +476,8 @@ static const AtStep at_steps[] = {
     {BTN_A, NULL, C_SOUND, 0}, PAUSE, {0, "sound-test", 0, 0}, PAUSE, {BTN_B, NULL, C_NOT_SOUND, 0}, PAUSE,
     {BTN_DOWN, NULL, C_ROW_MUSIC, 0}, {BTN_RIGHT, NULL, C_MUSIC_OFF, 0}, {0, "settings-music-off", 0, C_MUSIC_OFF}, PAUSE,
     {BTN_DOWN, NULL, C_ROW_VOLUME, 0}, {BTN_LEFT, NULL, C_VOL_6, 0}, {0, "settings-volume", 0, C_VOL_6}, PAUSE,
+    {BTN_DOWN, NULL, C_ROW_DRIFT, 0}, {BTN_LEFT, NULL, C_DRIFT_OFF, 0}, {0, "settings-drift-off", 0, C_DRIFT_OFF}, PAUSE,
+    {BTN_RIGHT, NULL, C_DRIFT_ALL, 0}, {0, "settings-drift", 0, C_DRIFT_ALL}, PAUSE,
     {BTN_DOWN, NULL, C_ROW_CUSTOM, 0}, {BTN_A, NULL, C_CUSTOM, 0}, {0, "customize", 0, 0}, PAUSE,
     {BTN_RIGHT, NULL, C_BODY, 0}, {BTN_DOWN, NULL, C_ROW_TRIM, 0}, {BTN_RIGHT, NULL, C_TRIM, 0},
     {BTN_DOWN, NULL, C_ROW_CHAO, 0}, {BTN_RIGHT, NULL, C_CHAO, 0}, {0, "customize-picked", 0, 0}, PAUSE,
@@ -472,10 +498,11 @@ static void settings_autotest(float dt) {
     t += dt;
 #ifdef DK_AT_SETTINGS_WANT
     if(t > 3.0f) {
-        ok = !save.music && !audio_music_enabled() && save.volume == 6 && save.custom_on && save.custom.body == 3 &&
-             save.custom.trim == 0 && save.custom.chao == 15 && strcmp(save.name, "PLAYER1") == 0;
-        printf("DK SETTINGS: loaded music %d volume %d custom %d (%d %d %d) name %s\nDK AUTOTEST: %s\n", save.music,
-               save.volume, save.custom_on, save.custom.body, save.custom.trim, save.custom.chao, save.name,
+        ok = !save.music && !audio_music_enabled() && save.volume == 6 && save.drift_show == DRIFT_SHOW_ALWAYS &&
+             save.custom_on && save.custom.body == 3 && save.custom.trim == 0 && save.custom.chao == 15 &&
+             strcmp(save.name, "PLAYER1") == 0;
+        printf("DK SETTINGS: loaded music %d volume %d drift %d custom %d (%d %d %d) name %s\nDK AUTOTEST: %s\n", save.music,
+               save.volume, save.drift_show, save.custom_on, save.custom.body, save.custom.trim, save.custom.chao, save.name,
                ok ? "PASS" : "FAIL");
         done = true;
     }
@@ -483,8 +510,8 @@ static void settings_autotest(float dt) {
 #endif
     if(step >= (int)(sizeof(at_steps) / sizeof(at_steps[0]))) {
         if(t > 3.0f) {   /* the card's write */
-            printf("DK SETTINGS: saved music %d volume %d custom %d (%d %d %d) name %s\nDK AUTOTEST: %s\n", save.music,
-                   save.volume, save.custom_on, save.custom.body, save.custom.trim, save.custom.chao, save.name,
+            printf("DK SETTINGS: saved music %d volume %d drift %d custom %d (%d %d %d) name %s\nDK AUTOTEST: %s\n", save.music,
+                   save.volume, save.drift_show, save.custom_on, save.custom.body, save.custom.trim, save.custom.chao, save.name,
                    ok ? "PASS" : "FAIL");
             done = true;
         }
@@ -504,7 +531,7 @@ static void settings_autotest(float dt) {
     }
     if(s->btn & (BTN_UP | BTN_DOWN | BTN_LEFT | BTN_RIGHT)) input_film_tap(0, s->btn);
     else if(s->btn) pad.pressed |= s->btn;
-    if(s->shot) printf("DK SHOT %s\n", s->shot);
+    if(s->shot) qa_shot("%s", s->shot);
     if(s->check && !at_cond(s->check)) {
         printf("DK SETTINGS: check %d failed at step %d (state %d colour %d music %d custom %d %d %d %d)\n", s->check,
                step, game.state, game.pl[0].colour, save.music, save.custom_on, save.custom.body, save.custom.trim,
@@ -749,7 +776,7 @@ static void tracks_update(float dt) {
     }
     if(pad.pressed & (BTN_A | BTN_START)) {
         audio_sfx(DK_SFX_MENU_SELECT, 230, 128);
-        audio_sfx(DK_SFX_CHAO_HAPPY, 200, 128);
+        audio_sfx(DK_SFX_VOICE_HAPPY, 200, 128);
         race_setup();
         game_set_state(ST_INTRO);
     }
@@ -763,14 +790,9 @@ void title_camera(Camera *cam, float dt) {
         float in = clampf(fly_t * 0.8f, 0, 1);
         in = in * in * (3 - 2 * in);
         float r = lerpf(260.0f, 190.0f, in), h = lerpf(130.0f, 92.0f, in);
-        cam->pos = v3(sinf(a) * r, h, cosf(a) * r * 0.8f);
-        V3 target = v3(0, 0, 0);
-        cam->fwd = vnorm(vsub(target, cam->pos));
-        cam->right = vnorm(vcross(v3(0, 1, 0), cam->fwd));
-        cam->up = vcross(cam->fwd, cam->right);
+        cam_look_at(cam, v3(sinf(a) * r, h, cosf(a) * r * 0.8f), v3(0, 0, 0));
         /* Tilt down a little so the course sits above the info panel. */
-        cam->fwd = vnorm(vmad(cam->fwd, cam->up, -0.16f));
-        cam->up = vcross(cam->fwd, cam->right);
+        cam_lean(cam, cam->up, -0.16f);
         cam->fov = 1.10f;
         return;
     }
@@ -784,15 +806,9 @@ void title_camera(Camera *cam, float dt) {
         a = game.title_t * 0.35f;
         r = 5.0f;
     }
-    cam->pos = vadd(target, v3(sinf(a) * r, 2.4f + 0.8f * sinf(game.title_t * 0.17f), cosf(a) * r));
-    cam->fwd = vnorm(vsub(target, cam->pos));
-    if(closeup) {
-        /* Shift the view so the kart sits left of centre. */
-        V3 right = vnorm(vcross(v3(0, 1, 0), cam->fwd));
-        cam->fwd = vnorm(vmad(cam->fwd, right, 0.28f));
-    }
-    cam->right = vnorm(vcross(v3(0, 1, 0), cam->fwd));
-    cam->up = vcross(cam->fwd, cam->right);
+    cam_look_at(cam, orbit_point(target, a, r, 2.4f + 0.8f * sinf(game.title_t * 0.17f)), target);
+    /* Shift the view so the kart sits left of centre. */
+    if(closeup) cam_lean(cam, cam->right, 0.28f);
     cam->fov = 1.20f;
 }
 
@@ -804,12 +820,8 @@ void title_kart_cameras(void) {
         V3 target = vadd(karts[game.pl[p].kart].pos, v3(0, 0.75f, 0));
         float a = game.title_t * 0.35f + (float)p * DK_PI;
         float r = 5.2f;
-        cam->pos = vadd(target, v3(sinf(a) * r, 1.6f + 0.4f * sinf(game.title_t * 0.17f + p), cosf(a) * r));
-        cam->fwd = vnorm(vsub(target, cam->pos));
-        V3 right = vnorm(vcross(v3(0, 1, 0), cam->fwd));
-        cam->fwd = vnorm(vmad(cam->fwd, right, 0.30f));
-        cam->right = vnorm(vcross(v3(0, 1, 0), cam->fwd));
-        cam->up = vcross(cam->fwd, cam->right);
+        cam_look_at(cam, orbit_point(target, a, r, 1.6f + 0.4f * sinf(game.title_t * 0.17f + p)), target);
+        cam_lean(cam, cam->right, 0.30f);
         cam->fov = 1.20f;
         cam->shake = 0;
     }
@@ -880,7 +892,7 @@ static const char *const loading_tips[] = {
 
 void title_draw_loading(float progress, const char *what, float t) {
     static int tip = -1;
-    if(tip < 0) tip = (int)(dk_rand() % (sizeof(loading_tips) / sizeof(loading_tips[0])));
+    if(tip < 0) tip = (int)(eng_rand() % (sizeof(loading_tips) / sizeof(loading_tips[0])));
     /* Boot steps are too far apart to animate the letters dropping in, so
        the logo sits settled; the title screen drops it in afterwards. */
     game.title_t = t;
@@ -961,12 +973,14 @@ static void draw_main(void) {
 
 static void draw_settings(void) {
     float slide = settings_slide * settings_slide * (3 - 2 * settings_slide);
-    float x0 = 150, x1 = 490, y0 = 160 + (1 - slide) * 300;   /* five rows: ends at 460, under the logo */
-    const float pitch = 42;
+    float x0 = 150, x1 = 490, y0 = 160 + (1 - slide) * 300;   /* six rows: ends at 466, under the logo */
+    const float pitch = 36;
     float y1 = y0 + 54 + SET_ROWS * pitch + 36;
     ui_panel(x0, y0, x1, y1);
     float yc = ui_title(x0, y0, x1, "SETTINGS") + 10;
-    static const char *const labels[SET_ROWS] = {"SOUND TEST", "ONLINE NAME", "MUSIC", "MUSIC VOLUME", "CUSTOMIZE KART"};
+    static const char *const labels[SET_ROWS] = {"SOUND TEST", "ONLINE NAME", "MUSIC", "MUSIC VOLUME", "DRIFT COUNTER",
+                                                  "CUSTOMIZE KART"};
+    static const char *const drift_names[DRIFT_SHOW_COUNT] = {"OFF", "FREE ROAM", "ALWAYS"};
     char vol[8];
     snprintf(vol, sizeof(vol), "%d/%d", save.volume, SAVE_VOLUME_MAX);
     for(int i = 0; i < SET_ROWS; i++) {
@@ -976,14 +990,16 @@ static void draw_settings(void) {
         const char *value = NULL;
         if(i == SET_MUSIC) value = save.music ? "ON" : "OFF";
         else if(i == SET_VOLUME) value = vol;
+        else if(i == SET_DRIFT) value = drift_names[save.drift_show];
         else if(i == SET_NAME) value = save.name[0] ? save.name : "-";
         else if(i == SET_CUSTOM && save.custom_on) value = "SAVED";
-        value_row(x0 + 14, x1 - 14, cy, sel, i == SET_MUSIC || i == SET_VOLUME, labels[i], value, 0);
+        value_row(x0 + 14, x1 - 14, cy, sel, i == SET_MUSIC || i == SET_VOLUME || i == SET_DRIFT, labels[i], value, 0);
     }
     const char *blurb = "LISTEN TO THE MUSIC AND SOUND EFFECTS";
     if(settings_row == SET_NAME) blurb = "THE NAME OTHER PLAYERS SEE ONLINE";
     else if(settings_row == SET_MUSIC) blurb = "MUSIC IN THE MENUS AND RACES, SAVED TO THE VMU";
     else if(settings_row == SET_VOLUME) blurb = "HOW LOUD THE MUSIC PLAYS, SAVED TO THE VMU";
+    else if(settings_row == SET_DRIFT) blurb = "SCORE YOUR DRIFTS IN FREE ROAM, EVERY MODE OR NEVER";
     else if(settings_row == SET_CUSTOM) blurb = save.custom_on ? "REPAINT YOUR OWN KART" : "PAINT A KART OF YOUR OWN";
     hud_text_c(320, y1 - 18, 0.4f, ALIGN_CENTER, ui_col(UI_DIM), blurb);
 }
@@ -1208,7 +1224,7 @@ static void draw_tracks(void) {
     ui_panel(52, y0, 588, y1);
     float mx = 160 + swap, my = (y0 + y1) * 0.5f;
     ui_well(mx - 98, y0 + 10, mx + 98, y1 - 10);
-    hud_draw_track_map(mx, my, 0.56f, 16.0f, false);
+    hud_draw_track_map(mx, my, hud_track_map_fit(0.56f, 94.0f, 55.0f), 16.0f, false);
 
     float tx = 412 + swap;
     float pulse = 1.0f + 0.03f * sinf(game.title_t * 5.0f);
@@ -1245,7 +1261,8 @@ void title_draw(void) {
         char sub[48];
         snprintf(sub, sizeof(sub), "%s GRAND PRIX", track.name);
         hud_text(320, 196, 0.62f, ALIGN_CENTER, argb(255, 255, 255, 255), sub);
-        hud_text(320, 440, 0.45f, ALIGN_CENTER, argb(200, 230, 240, 255), "github.com/richstokes");
+        /* The iOS app can't link out, so the GitHub line stays off there. */
+        if(!game.ios) hud_text(320, 440, 0.45f, ALIGN_CENTER, argb(200, 230, 240, 255), "github.com/richstokes");
         /* Build id for bug reports: the commit this was built from. */
         hud_text(604, 446, 0.32f, ALIGN_RIGHT, argb(150, 230, 240, 255), DK_GIT_SHA);
     }

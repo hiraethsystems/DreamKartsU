@@ -3,12 +3,18 @@
 UP := upstream
 GEN := $(UP)/assets/generated
 
-# Upstream sources, all but netlink.c (replaced by port/netlink_port.c).
-UP_SOURCES := main.c input.c track.c kart.c render.c world.c models.c fx.c hud.c ui.c title.c audio.c \
-	rumble.c dolphins.c biplane.c net.c online.c save.c vmuscreen.c spectate.c film.c items.c gp.c \
-	chat.c perfhud.c flappy.c roam.c world_mesh.c world_road.c world_props.c world_beach.c \
-	world_coral.c world_harbour.c world_temple.c world_skyway.c world_canyon.c world_tsudoken.c \
-	world_apple.c world_lot.c tide.c birds.c autotest.c prof.c
+# Upstream sources in upstream's link order (its Makefile's SOURCES), all
+# but netlink.c (replaced by port/netlink_port.c). Since upstream af4eb66,
+# input.c, render.c, mesh.c, text.c, ui.c, sfx.c, prof.c, frame.c, qa.c and
+# sky.c are the shared engine's (upstream_common/engine): the compile rules
+# look in upstream/src first, then there. Upstream's COMMON_SOURCES
+# (dialup.c, the Dreamcast modem's PPP dialler) is left out with netlink.c.
+UP_SOURCES := main.c input.c track.c kart.c render.c world.c models.c mesh.c fx.c hud.c text.c theme.c ui.c \
+	title.c audio.c sfx.c rumble.c dolphins.c biplane.c net.c online.c save.c vmuscreen.c spectate.c film.c \
+	items.c gp.c chat.c perfhud.c flappy.c roam.c world_mesh.c world_road.c world_props.c world_beach.c \
+	world_coral.c world_harbour.c world_temple.c world_skyway.c world_canyon.c world_tsudoken.c world_apple.c \
+	world_lot.c world_sf.c tide.c cablecar.c birds.c skylife.c autotest.c prof.c frame.c qa.c sky.c track_tex.c
+ENGINE := upstream_common/engine
 PORT_SOURCES := port/xform_c.c port/render_native.c port/netlink_port.c port/shim/pvr_ta.c port/shim/kos_shim.c \
 	port/shim/snd_shim.c port/shim/cdda_shim.c third_party/sh4zam/source/sw/shz_xmtrx_sw.c
 
@@ -26,7 +32,7 @@ NATIVE_TAG := $(if $(filter 1,$(NATIVE)),,-cpu)
 VARIANT_FLAGS_release :=
 VARIANT_FLAGS_autotest := -DDK_AUTOTEST
 VARIANT_FLAGS_capture := -DDK_AUTOTEST -DDK_CAPTURE
-VARIANT_FLAGS_xfcheck := -DDK_AUTOTEST -DDK_XF_CHECK
+VARIANT_FLAGS_xfcheck := -DDK_AUTOTEST -DDK_XF_CHECK -DENG_XF_CHECK
 VARIANT_FLAGS_savetest :=
 VARIANT_FLAGS_rumbletest := -DDKU_RUMBLE_PROBE
 VARIANT_FLAGS_exittest := -DDKU_EXIT_AFTER_FRAMES=1500
@@ -43,7 +49,7 @@ endif
 # is signed and PowerPC char is not (PORT_PLAN.md 1.2).
 COMMON_CFLAGS := -DDKU $(NATIVE_FLAGS) -std=gnu17 -O2 -ffast-math -fsigned-char -g -Wall -Wextra -Wno-unused-parameter \
 	-Wno-missing-field-initializers -Wno-deprecated-declarations
-COMMON_CPPFLAGS := -iquote port/shim/relroot/a/b/c -Iport/shim -Iport -I$(UP)/src -I$(GEN) \
+COMMON_CPPFLAGS := -iquote port/shim/relroot/a/b/c -Iport/shim -Iport -I$(UP)/src -Iupstream_common -I$(GEN) \
 	-Ithird_party/sh4zam/include -isystem third_party/dr_libs -MMD -MP
 
 UPSTREAM_SHA := $(shell grep -m1 -oE '`[0-9a-f]{40}`' UPSTREAM.md | head -1 | tr -d '`' | cut -c1-7)
@@ -53,3 +59,5 @@ PORT_SHA := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
 # world_canyon.c counts the bushes it places only for an autotest printf,
 # so release builds see the counter as set but unused.
 UP_QUIET_world_canyon := -Wno-unused-but-set-variable
+# world_sf.c (Bay City Hills) the same, for its block and house counters.
+UP_QUIET_world_sf := -Wno-unused-but-set-variable

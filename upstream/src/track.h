@@ -9,7 +9,7 @@
 enum { SURF_ROAD, SURF_CURB, SURF_SAND };
 enum { SEC_ASPHALT, SEC_BOARDWALK };
 enum { TRACK_BEACH, TRACK_FIGURE8, TRACK_HARBOUR, TRACK_TEMPLE, TRACK_SKYWAY, TRACK_CYBERSTONE, TRACK_CANYON, TRACK_TSUDOKEN,
-       TRACK_APPLE, TRACK_LOT, TRACK_COUNT };
+       TRACK_APPLE, TRACK_LOT, TRACK_SF, TRACK_COUNT };
 /* Tracks the race menus do not offer (the track select, the Grand Prix),
    kept in the code and in the online protocol's numbering: Cyberstone is
    retired for now, and the Night Meet lot is Free Roam's (the mode loads
@@ -124,7 +124,7 @@ typedef struct {
     float boost;     /* boost seconds */
 } DashPad;
 
-#define MAX_DASH_PADS 4
+#define MAX_DASH_PADS 6
 
 /* An invisible band across the road where a power-up emerald can sit, in
    one of ITEM_SLOTS slots across its width (items.c). */
@@ -133,7 +133,7 @@ typedef struct {
     float d;         /* the slots' centre across the road: 0 on the road; Night Meet puts bands out in the lot and up on the deck */
 } ItemBand;
 
-#define MAX_ITEM_BANDS 4
+#define MAX_ITEM_BANDS 8
 
 /* A ramp jump: the road climbs to a lip, opens over a gap (another stretch
    of track passes beneath) and comes down a landing deck. */
@@ -173,6 +173,9 @@ extern Track track;
 
 static inline bool track_is_roam(void) { return track.id == TRACK_LOT; }
 
+/* Per track, the textures only its scenes draw, ended by -1 (track_tex.c):
+   the engine renderer's texture sets (engine_assets.h). */
+extern const int16_t *const track_textures[];
 extern const char *const track_names[TRACK_COUNT];
 
 void track_init(int id);
@@ -191,6 +194,18 @@ float track_seg_deg(int i);
    8 m), and the long top straight. */
 #define AV_HALF     6.5f
 #define AV_TOP_SEG  24
+/* Bay City Hills: the road's half width (Apple Valley's), the segments of
+   the pier, the Hyde Street climb, the crooked street's switchbacks (first
+   and last) and the plunge, and the quay's height. */
+#define SF_HALF       6.5f
+#define SF_PIER_SEG   1
+#define SF_PIER_END   5
+#define SF_HYDE_SEG   12
+#define SF_CROOK_SEG  15
+#define SF_CROOK_END  23
+#define SF_PLUNGE_SEG 30
+#define SF_QUAY_Y     1.2f
+#define SF_PIER_RAIL_H 0.55f   /* the pier's low edge, so the water and the sea lions show over it */
 /* Locate p on the track. hint is the previous segment index or -1. */
 void track_locate(V3 p, int hint, TrackPos *out);
 /* World point at lap distance s (wrapped) and lateral offset d. */

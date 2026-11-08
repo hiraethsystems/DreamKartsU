@@ -33,14 +33,14 @@ typedef enum {
     DK_SFX_MENU_MOVE,
     DK_SFX_MENU_SELECT,
     DK_SFX_MENU_BACK,
-    DK_SFX_CHAO,
-    DK_SFX_CHAO_HAPPY,
-    DK_SFX_CHAO_HEY,
-    DK_SFX_CHAO_CHU,
-    DK_SFX_CHAO_YAY,
-    DK_SFX_CHAO_WAH,
-    DK_SFX_CHAO_BUU,
-    DK_SFX_CHAO_HYA,
+    DK_SFX_VOICE_HELLO,
+    DK_SFX_VOICE_HAPPY,
+    DK_SFX_VOICE_HUH,
+    DK_SFX_VOICE_CHU,
+    DK_SFX_VOICE_YAY,
+    DK_SFX_VOICE_WAH,
+    DK_SFX_VOICE_BUU,
+    DK_SFX_VOICE_HYA,
     DK_SFX_WHOOSH,
     DK_SFX_STAR,
     DK_SFX_EMERALD,
@@ -52,6 +52,8 @@ typedef enum {
     DK_SFX_MINE_HIT,
     DK_SFX_BELL,
     DK_SFX_PLANE,
+    DK_SFX_CC_BELL,
+    DK_SFX_FOGHORN,
     DK_SFX_COUNT
 } dk_sfx_id_t;
 
@@ -80,14 +82,14 @@ static const dk_sfx_asset_t dk_sfx_assets[DK_SFX_COUNT] __attribute__((unused)) 
     { 610112u, 1984u, 0u, 22050u }, /* MENU_MOVE    vol 115 */
     { 612096u, 18528u, 0u, 22050u }, /* MENU_SELECT  vol 153 */
     { 630624u, 13248u, 0u, 22050u }, /* MENU_BACK    vol 140 */
-    { 643872u, 24704u, 0u, 22050u }, /* CHAO         vol 178 */
-    { 668576u, 54688u, 0u, 22050u }, /* CHAO_HAPPY   vol 178 */
-    { 723264u, 24704u, 0u, 22050u }, /* CHAO_HEY     vol 178 */
-    { 747968u, 19872u, 0u, 22050u }, /* CHAO_CHU     vol 166 */
-    { 767840u, 24256u, 0u, 22050u }, /* CHAO_YAY     vol 178 */
-    { 792096u, 19872u, 0u, 22050u }, /* CHAO_WAH     vol 178 */
-    { 811968u, 22080u, 0u, 22050u }, /* CHAO_BUU     vol 178 */
-    { 834048u, 15904u, 0u, 22050u }, /* CHAO_HYA     vol 166 */
+    { 643872u, 24704u, 0u, 22050u }, /* VOICE_HELLO  vol 178 */
+    { 668576u, 54688u, 0u, 22050u }, /* VOICE_HAPPY  vol 178 */
+    { 723264u, 24704u, 0u, 22050u }, /* VOICE_HUH    vol 178 */
+    { 747968u, 19872u, 0u, 22050u }, /* VOICE_CHU    vol 166 */
+    { 767840u, 24256u, 0u, 22050u }, /* VOICE_YAY    vol 178 */
+    { 792096u, 19872u, 0u, 22050u }, /* VOICE_WAH    vol 178 */
+    { 811968u, 22080u, 0u, 22050u }, /* VOICE_BUU    vol 178 */
+    { 834048u, 15904u, 0u, 22050u }, /* VOICE_HYA    vol 166 */
     { 849952u, 26464u, 0u, 22050u }, /* WHOOSH       vol 153 */
     { 876416u, 22944u, 0u, 22050u }, /* STAR         vol 128 */
     { 899360u, 35296u, 0u, 22050u }, /* EMERALD      vol 153 */
@@ -99,6 +101,8 @@ static const dk_sfx_asset_t dk_sfx_assets[DK_SFX_COUNT] __attribute__((unused)) 
     { 1068288u, 41920u, 0u, 22050u }, /* MINE_HIT     vol 217 */
     { 1110208u, 61760u, 0u, 22050u }, /* BELL         vol 191 */
     { 1171968u, 12000u, 1u, 11025u }, /* PLANE        vol 204 */
+    { 1184000u, 52928u, 0u, 22050u }, /* CC_BELL      vol 191 */
+    { 1236928u, 127904u, 0u, 22050u }, /* FOGHORN      vol 204 */
 };
 
 /* Effect names for the sound test. */
@@ -126,9 +130,9 @@ static const char *const dk_sfx_label[DK_SFX_COUNT] __attribute__((unused)) = {
     "MENU MOVE",
     "MENU SELECT",
     "MENU BACK",
-    "CHAO",
-    "HAPPY CHAO",
-    "CHAO?",
+    "HELLO",
+    "HAPPY",
+    "HUH?",
     "CHU-CHU",
     "YA-YA",
     "WAH!",
@@ -137,7 +141,7 @@ static const char *const dk_sfx_label[DK_SFX_COUNT] __attribute__((unused)) = {
     "WHOOSH",
     "STAR",
     "EMERALD",
-    "CHAOS SPEAR",
+    "STAR SPEAR",
     "SPEAR HIT",
     "BARRIER",
     "BARRIER POP",
@@ -145,6 +149,8 @@ static const char *const dk_sfx_label[DK_SFX_COUNT] __attribute__((unused)) = {
     "MINE BLAST",
     "LOBBY BELL",
     "BIPLANE",
+    "CABLE CAR BELL",
+    "FOGHORN",
 };
 
 #endif /* DK_SOUND_ASSETS_H */
