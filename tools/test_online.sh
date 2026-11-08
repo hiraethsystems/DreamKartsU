@@ -19,6 +19,12 @@
 #             show THIS VERSION IS TOO OLD, not a lost connection
 #   restart   the server restarts mid-race and repeats its race ids: the
 #             game must come back through the browser into the next race
+#   wiiu      the race scenario with the Wii U build in Cemu
+#             (tools/cemu_run.sh); in the default list when Cemu is there
+#   console   the race scenario on the Wii U itself (tools/wiiu.py run,
+#             which starts it on the TV): the server listens on this PC's
+#             LAN address and the build is pointed there. Never in the
+#             default list.
 #
 # Never talks to any server but its own: the client is built with
 # DK_NET_TEST_HOST=127.0.0.1 (Makefile) and test builds refuse dcvmu.com
@@ -41,8 +47,18 @@ GOBIN_DIR=$ROOT/build/go
 mkdir -p "$OUT" "$GOBIN_DIR"
 export GOCACHE=$ROOT/build/go/cache GOTOOLCHAIN=local
 
+SERVER_IP=127.0.0.1
 scenarios=(race custom practice spectate watch reject restart)
+ls "$HOME"/Applications/Cemu-*.AppImage >/dev/null 2>&1 && scenarios+=(wiiu)
 [[ $# -gt 0 ]] && scenarios=("$@")
+if [[ " ${scenarios[*]} " == *" console "* ]]; then
+    [[ ${#scenarios[@]} == 1 ]] || { echo "test_online: run console on its own" >&2; exit 2; }
+    CONSOLE=${WIIU_IP:-$(cat .wiiu-console 2>/dev/null || true)}
+    [[ -n $CONSOLE ]] || { echo "test_online: no console address (tools/wiiu.py set-ip)" >&2; exit 2; }
+    # This PC's address on the console's network: the one server it may use.
+    SERVER_IP=$(ip -4 route get "$CONSOLE" | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+    [[ -n $SERVER_IP ]] || { echo "test_online: no route to $CONSOLE" >&2; exit 2; }
+fi
 
 command -v go >/dev/null || { echo "test_online: go not found (see PORT_PLAN.md, Needs Aisling)" >&2; exit 2; }
 if ss -Hlun "sport = :$PORT" 2>/dev/null | grep -q .; then
@@ -83,8 +99,12 @@ go build -C "$SERVER_DIR" -o "$GOBIN_DIR/bot" ./cmd/dk-bot
 start_server() {   # start_server <log> [server flags]
     local log=$1; shift
     : > "$log"
-    # No word list download: the built-in list plus BLORP, for the chat check.
-    "$GOBIN_DIR/lobby" -listen "127.0.0.1:$PORT" -words-extra BLORP -words-url '' -words-cache '' "$@" >> "$log" 2>&1 &
+    # No word list download: the server falls back at once to a cached
+    # copy, here a one-word list, plus BLORP for the chat check. (With no
+    # list at all it retries for 10 s before it serves, and a restarted
+    # server must answer within the game's 6 s.)
+    printf 'DKUTESTWORD\n' > "$OUT/words.txt"
+    "$GOBIN_DIR/lobby" -listen "$SERVER_IP:$PORT" -words-extra BLORP -words-url '' -words-cache "$OUT/words.txt" "$@" >> "$log" 2>&1 &
     server_pid=$!
     for _ in $(seq 1 50); do
         grep -q ":$PORT" "$log" 2>/dev/null && return 0
@@ -95,7 +115,7 @@ start_server() {   # start_server <log> [server flags]
 }
 bot() {   # bot <delay-seconds> [bot flags], in the background
     local delay=$1; shift
-    ( sleep "$delay"; exec "$GOBIN_DIR/bot" -addr "127.0.0.1:$PORT" "$@" ) >> "$OUT/$scenario-bot.log" 2>&1 &
+    ( sleep "$delay"; exec "$GOBIN_DIR/bot" -addr "$SERVER_IP:$PORT" "$@" ) >> "$OUT/$scenario-bot.log" 2>&1 &
     pids+=("$!")
 }
 start_bots() {
@@ -105,6 +125,15 @@ start_bots() {
 }
 build_client() {   # build_client <cflags>: sets bin
     local tag=online-$scenario
+    if [[ $scenario == wiiu || $scenario == console ]]; then
+        bin=build/wiiu-gx2-autotest-$tag/DreamKartsU.wuhb
+        rm -f "$bin"
+        make -s -j"$JOBS" -f Makefile.wiiu VARIANT=autotest TAG="$tag" \
+            EXTRA_CFLAGS="$1 -DDK_NET_PORT=$PORT -DDK_NET_TEST_HOST=$SERVER_IP" \
+            > "$OUT/$scenario-build.log" 2>&1 ||
+            { cat "$OUT/$scenario-build.log"; echo "   build failed" >&2; return 1; }
+        return 0
+    fi
     bin=build/host-null-autotest-$tag/dreamkartsu
     rm -f "$bin"
     make -s -j"$JOBS" BACKEND=null VARIANT=autotest TAG="$tag" EXTRA_CFLAGS="$1 -DDK_NET_PORT=$PORT" \
@@ -115,6 +144,22 @@ run_client() {   # run_client: until PASS or FAIL; on the cue line, restart the 
     local log=$OUT/$scenario.log start cued=0 bots_cued=0 limit=$TIMEOUT save=$OUT/$scenario-save
     [[ $scenario == spectate && $limit -lt 600 ]] && limit=600
     : > "$log"
+    if [[ $scenario == wiiu ]]; then
+        # Cemu passes the game's sockets to the PC's, so 127.0.0.1 is here.
+        tools/cemu_run.sh "$bin" "$limit" "$OUT/wiiu-cemu" 30 > /dev/null 2>&1 || true
+        cp "$OUT/wiiu-cemu/log.txt" "$log" 2>/dev/null || true
+        grep -aq 'DK AUTOTEST: PASS' "$log"
+        return
+    fi
+    if [[ $scenario == console ]]; then
+        python3 tools/wiiu.py run "$bin" > "$OUT/console-run.log" 2>&1 ||
+            { cat "$OUT/console-run.log"; return 1; }
+        timeout $((limit + 30)) python3 tools/wiiu.py log --for "$limit" --until 'DK AUTOTEST: (PASS|FAIL)' > "$log" 2>&1 || true
+        echo "   the game stays open on the console: once the server stops it shows"
+        echo "   LOST CONNECTION TO THE SERVER; close it from the HOME menu"
+        grep -aq 'DK AUTOTEST: PASS' "$log"
+        return
+    fi
     rm -rf "$save" && mkdir -p "$save"
     DKU_REALTIME=1 DKU_SAVE_DIR=$save SDL_AUDIODRIVER=dummy "$bin" > "$log" 2>&1 &
     client_pid=$!
@@ -183,6 +228,16 @@ for scenario in "${scenarios[@]}"; do
         reject)
             cflags="-DDK_AT_ONLINE -DDK_AT_REJECT"
             server_flags=(-reject-proto 9) ;;
+        wiiu|console)
+            cflags="-DDK_AT_ONLINE"
+            bot_args=(-name AT-JOBEN -lobby 8 -start -start-delay 28s -race 69 -skid -path "$PATHFILE"
+                      -chat "HELLO FROM BOT;YOU ARE A BLORPHEAD" -for 8m)
+            # Cemu drops every remote sample after the first (net.c's 64-bit
+            # "stale" compare comes out wrong there; the console and the
+            # big-endian PC build store them all, log 2026-11-08), so the
+            # bot's kart stands on the grid and lays no marks: only the
+            # console is asked for them.
+            [[ $scenario == console ]] && want="[1-9][0-9]* remote skid marks" ;;
         restart)
             cflags="-DDK_AT_ONLINE -DDK_AT_RESTART -DDK_AT_LOBBY=5"
             server_flags=(-race-seed 40)
@@ -209,7 +264,7 @@ for scenario in "${scenarios[@]}"; do
     echo "   ${results[${#results[@]}-1]}"
 done
 
-echo "== online (local 127.0.0.1:$PORT)"
+echo "== online (local $SERVER_IP:$PORT)"
 printf '%s\n' "${results[@]}"
 [[ $failed == 0 ]] && echo "test_online: PASS" || echo "test_online: FAIL"
 exit "$failed"

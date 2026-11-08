@@ -6,6 +6,8 @@
    - Time is the system clock; the display paces frames (render_gx2.c).
    - Controllers: the GamePad and up to three Wii Remote channels (Pro,
      Classic, Nunchuk or a sideways remote), with rumble (below).
+   - A USB keyboard (nsyskbd) types in the chat and the name screen; the
+     GamePad types with upstream's on-screen keys.
    - Sound: audio_ax.c. Music files come from the .wuhb's content folder.
    - Saves live on the SD card in SAVE_DIR.
    - stdout and stderr go to the log (testlog.c): a file per build next to
@@ -20,6 +22,7 @@
 #include <string.h>
 #include <sys/iosupport.h>
 #include <sys/stat.h>
+#include <nsyskbd/nsyskbd.h>
 #include <padscore/kpad.h>
 #include <padscore/wpad.h>
 #include <proc_ui/procui.h>
@@ -384,9 +387,58 @@ void plat_rumble(int i, int power, int freq) {
     motor(i, power);
 }
 
-bool plat_keyboard(void) { return false; }
+/* ---- USB keyboard ----
 
-int plat_keys(int *buf, int max) { return 0; }
+   nsyskbd calls these on its own thread with USB HID usage codes, which
+   are the codes KOS's keyboard reports, so a key goes into the queue as
+   it is: key | modifiers << 8 | lights << 16 (port/shim/kos_shim.c reads
+   it as kbd_queue_pop). One writer (the callback) and one reader (the
+   game), so the ring needs only ordered loads and stores. */
+
+#define KEY_RING 64
+static int key_ring[KEY_RING];
+static unsigned key_put, key_get;   /* key_put: the callback's; key_get: the game's */
+static int kbd_attached;
+static uint8_t kbd_mods, kbd_leds;
+
+static void kbd_attach(KBDAttachEvent *e) {
+    __atomic_add_fetch(&kbd_attached, 1, __ATOMIC_RELEASE);
+    printf("DKU KEYBOARD: attached on channel %d\n", e->channel);
+}
+
+static void kbd_detach(KBDAttachEvent *e) {
+    __atomic_sub_fetch(&kbd_attached, 1, __ATOMIC_RELEASE);
+    kbd_mods = 0;
+    printf("DKU KEYBOARD: detached from channel %d\n", e->channel);
+}
+
+static void kbd_key(KBDKeyEvent *e) {
+    uint8_t code = e->hidCode;
+    if(code >= 0xe0 && code <= 0xe7) {   /* the modifiers: the HID bit order is KOS's */
+        uint8_t bit = (uint8_t)(1u << (code - 0xe0));
+        kbd_mods = e->isPressedDown ? kbd_mods | bit : kbd_mods & (uint8_t)~bit;
+        return;
+    }
+    if(!e->isPressedDown || code == 0) return;
+    if(code == 0x39) {   /* Caps Lock */
+        kbd_leds ^= 2;
+        return;
+    }
+    unsigned put = key_put;
+    if(put - __atomic_load_n(&key_get, __ATOMIC_ACQUIRE) >= KEY_RING) return;   /* full: drop it */
+    key_ring[put % KEY_RING] = code | kbd_mods << 8 | kbd_leds << 16;
+    __atomic_store_n(&key_put, put + 1, __ATOMIC_RELEASE);
+}
+
+bool plat_keyboard(void) { return __atomic_load_n(&kbd_attached, __ATOMIC_ACQUIRE) > 0; }
+
+int plat_keys(int *buf, int max) {
+    unsigned get = key_get, put = __atomic_load_n(&key_put, __ATOMIC_ACQUIRE);
+    int n = 0;
+    while(get != put && n < max) buf[n++] = key_ring[get++ % KEY_RING];
+    __atomic_store_n(&key_get, get, __ATOMIC_RELEASE);
+    return n;
+}
 
 /* ---- The HOME menu ----
 
@@ -435,6 +487,8 @@ void plat_init(void) {
     KPADInit();
     WPADEnableURCC(TRUE);
     WPADEnableWiiRemote(TRUE);
+    KDBError kerr = KBDSetup(kbd_attach, kbd_detach, kbd_key);
+    if(kerr != KDB_ERROR_NONE) printf("DKU KEYBOARD: KBDSetup failed (%d)\n", (int)kerr);
     audio_ax_start();
 }
 
@@ -460,6 +514,7 @@ void plat_shutdown(void) {
     for(int i = 0; i < PLAT_PADS; i++) motor(i, 0);
     audio_ax_stop();
     KPADShutdown();
+    KBDTeardown();
     printf("DKU EXIT: done\n");
     testlog_stop();
     WHBLogCafeDeinit();

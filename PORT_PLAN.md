@@ -352,9 +352,12 @@ hardware checkpoint.
   received.
 - Keep `net_version.h` exactly as upstream. Do not invent a platform field
   in the protocol; that is Rich's server and his decision.
-- Chat entry (moved from M4): USB keyboard via `nsyskbd`, and the
-  `nn_swkbd` software keyboard as the fallback; the PC build's keyboard
-  feeds the same KOS-style queue.
+- Chat entry (moved from M4): USB keyboard via `nsyskbd`, feeding the
+  KOS-style queue. Without a keyboard, upstream's own on-screen keys
+  (pad-driven, as on the Dreamcast) do the typing, so `nn_swkbd` is not
+  needed (plan change 2026-11-08). The PC build's keyboard moves to M7:
+  there it also drives pad 0, so typing needs a mode switch, which goes
+  with M7's key rebinding.
 
 **Done when:** `test_online.sh` passes on the host build; the Wii U build
 connects to the local server in Cemu or on console. Tag `m6`.
@@ -373,7 +376,9 @@ live race is one Aisling plays.
   producing the `.wuhb` as an artifact, plus a Linux PC build (and
   `tools/test_host.sh` with the null backend) on every push.
 - PC release: settings for window size and fullscreen, key rebinding,
-  and music and saves working the same as on the Wii U.
+  and music and saves working the same as on the Wii U. The keyboard
+  types in the chat (moved from M6): a gamepad plugged in, or a typing
+  mode, frees it from driving pad 0.
 - Upstream sync procedure tested once: pull a newer upstream commit,
   re-run every test.
 
@@ -460,6 +465,11 @@ At tags `m3`, `m5`, `m6`, `m7`:
   (e.g. Mario Kart 8)? `VARIANT=rumbletest` is ready for the next try. Pro Controller and
   Wii Remote rumble are still untried. ~~Sound~~: works (Aisling,
   2026-11-07). Sheet: `TESTING.md` m4.
+- **M6 on the console (2026-11-08):** a USB keyboard in the Wii U's USB
+  port should type in the chat (X in a lobby) and on the name screen;
+  untried, as no keyboard is attached here. Assumed to work like the
+  GamePad's on-screen keys until tried. And the first live race on
+  dcvmu.com with a release build: Aisling's to play (`TESTING.md` m6).
 - **M3 hardware test (2026-11-04):** the m3 builds are ready to try on
   the console. What to check and where to write results: `TESTING.md`.
 
@@ -890,3 +900,34 @@ At tags `m3`, `m5`, `m6`, `m7`:
   release builds use dcvmu.com by default as upstream does (`server.txt`
   still overrides); test builds keep 127.0.0.1 and refuse the live server
   unless built with `DK_AT_LIVE`.
+- 2026-11-08: **M6 online.** `tools/test_online.sh` runs upstream's seven
+  online scenarios (`upstream/tools/online-qa.sh`) on the PC null build
+  against Rich's lobby server built from `upstream/server`, on 127.0.0.1:
+  race, custom, practice, spectate, watch, reject, restart, all PASS. Plus
+  `wiiu` (the Wii U build in Cemu) and `console` (the Wii U itself, the
+  server on this PC's LAN address).
+  - `DKU_REALTIME=1` paces the headless build at 60 Hz of wall-clock time,
+    since the server and bots keep real time; `TAG=` gives each scenario's
+    build a folder of its own (both Makefiles).
+  - The server reads the bad word list before it serves and retries a
+    failed download for 10 s, so a restarted server missed the game's 6 s
+    timeout (the restart scenario). Upstream's harness downloads the list;
+    ours gives the server a one-word cached copy and stays offline.
+  - **Console: PASS** (build from this commit's tree): connected to the
+    PC's server over Wi-Fi, chat filtered as it should be, raced the bot,
+    351 remote skid marks, worst remote jump 3.74 m (8 stalls), ping 8 ms.
+  - **Cemu keeps only the first remote kart sample**: net.c's
+    `t <= h[n - 1].t` (a 64-bit compare, two 32-bit halves sharing one
+    condition register result) comes out "stale" for every later sample,
+    so remote karts stand on the grid. GCC's code is right, and the
+    big-endian PC build (qemu-ppc) and the console store every sample.
+    The `wiiu` scenario checks connecting, chat, the race and the place;
+    remote motion is checked on the console. Like Cemu's world drawing
+    (2026-11-07), this is Cemu's, not the port's.
+  - Found on the way: `render_gx2.c` includes the generated `dku_build.h`
+    in autotest builds without a make dependency, so a clean parallel
+    build could fail; fixed in `Makefile.wiiu`.
+  - Chat entry: a USB keyboard via `nsyskbd` (`plat_wiiu.c`; HID codes go
+    straight into the KOS-style queue), untried on hardware (Needs
+    Aisling). Without one, upstream's on-screen keys type, so `nn_swkbd` is
+    dropped. The PC keyboard moves to M7: it also drives pad 0.

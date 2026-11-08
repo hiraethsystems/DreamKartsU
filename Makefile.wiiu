@@ -18,6 +18,8 @@ VARIANT ?= release
 BACKEND ?= gx2
 DK_AT_TRACK ?=
 EXTRA_CFLAGS ?=
+# TAG=name: a build folder of its own, for builds with other EXTRA_CFLAGS.
+TAG ?=
 # The "BUILD NNNN" label on screen, for the console testing phase: 0 removes it.
 BUILD_OVERLAY ?= 1
 
@@ -33,7 +35,7 @@ else
 $(error BACKEND must be gx2 or null)
 endif
 
-CFG := wiiu-$(BACKEND)-$(VARIANT)$(NATIVE_TAG)$(if $(DK_AT_TRACK),-t$(DK_AT_TRACK))
+CFG := wiiu-$(BACKEND)-$(VARIANT)$(NATIVE_TAG)$(if $(DK_AT_TRACK),-t$(DK_AT_TRACK))$(if $(TAG),-$(TAG))
 OUT := build/$(CFG)
 ELF := $(OUT)/DreamKartsU.elf
 
@@ -117,10 +119,11 @@ $(OUT)/port/shaders/shaders.o: port/shaders/shaders.S $(addprefix port/shaders/,
 	@mkdir -p $(dir $@)
 	$(CC) $(MACHDEP) -c -o $@ $<
 
-# The test build number: only testlog.c includes this, so a new number
-# rebuilds one file. tools/build_number.sh adds one when the sources change.
+# The test build number: testlog.c includes this, and render_gx2.c in
+# autotest builds (screenshot names), so a new number rebuilds two files.
+# tools/build_number.sh adds one when the sources change.
 DKU_BUILD := $(shell tools/build_number.sh)
-$(OUT)/port/testlog.o: $(OUT)/dku_build.h
+$(OUT)/port/testlog.o $(OUT)/port/render_gx2.o: $(OUT)/dku_build.h
 $(OUT)/dku_build.h: force
 	@mkdir -p $(OUT)
 	@printf '#define DKU_BUILD_NUMBER %s\n#define DKU_BUILD_SHA "%s"\n' $(DKU_BUILD) $(PORT_SHA) | cmp -s - $@ || \

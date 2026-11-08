@@ -162,3 +162,23 @@ uses an item**, both triggers together look back.
 ### Results
 
 (Write here.)
+
+## m6: online
+
+`tools/test_online.sh` checks online play on the PC, in Cemu, and with
+`tools/test_online.sh console` on the Wii U against a server on the PC.
+None of these use Rich's server. What only you can do:
+
+### Things to check
+
+1. **USB keyboard.** Plug a USB keyboard into the Wii U. Start the game,
+   choose Online, and type a name with the keyboard. In a lobby, press X
+   on the GamePad and type a chat line, then Enter. Does it type? Do Shift
+   and Backspace work?
+2. **A race with Rich.** The release build in the Wii U Menu connects to
+   dcvmu.com. Join Rich's lobby, chat, race. Does his kart move smoothly?
+   Does the race end with both of you in the results?
+
+### Results
+
+(write here)
