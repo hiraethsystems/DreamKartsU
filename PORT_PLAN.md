@@ -5,7 +5,7 @@ Port of **DreamKarts** by Rich Stokes (Dreamcast, KallistiOS) to the Wii U
 same lobby server.
 
 - Upstream: https://github.com/richstokes/dreamcast-homebrew/tree/main/projects/games/dreamkarts (MIT)
-- This repo: https://github.com/hiraethclub/DreamKartsU
+- This repo: https://github.com/hiraethsystems/DreamKartsU
 - Dev machine: Debian 13, x86_64. Work lives in `~/WiiUDev/DreamKartsU`.
 
 This file is the source of truth for Claude Code. Read it at the start of
@@ -404,7 +404,7 @@ At tags `m3`, `m5`, `m6`, `m7`:
 - Read `PORT_PLAN.md` and the progress log first, every session.
 - Work milestone by milestone. Commit small and often with clear
   messages. Tag at each milestone's end.
-- Never push to any remote other than `origin` (hiraethclub/DreamKartsU),
+- Never push to any remote other than `origin` (hiraethsystems/DreamKartsU),
   never force-push `main`.
 - Rich agreed to Wii U consoles on his live server, dcvmu.com (Aisling,
   2026-11-08), so release builds use it, as the Dreamcast does. Test and

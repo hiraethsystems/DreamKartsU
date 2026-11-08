@@ -8,7 +8,7 @@ milestones and the progress log are in `PORT_PLAN.md`.
 - Read `PORT_PLAN.md` and the progress log first, every session.
 - Work milestone by milestone. Commit small and often with clear
   messages. Tag at each milestone's end.
-- Never push to any remote other than `origin` (hiraethclub/DreamKartsU),
+- Never push to any remote other than `origin` (hiraethsystems/DreamKartsU),
   never force-push `main`.
 - Rich agreed to Wii U consoles on his live server, dcvmu.com (Aisling,
   2026-11-08), so release builds use it, as the Dreamcast does. Test and
