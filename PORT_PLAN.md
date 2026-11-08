@@ -57,9 +57,10 @@ Constraints:
 - Emerald slots come from a seed derived from lobby, race id and track:
   integer code, so it matches across CPUs. Check that the derivation uses no
   floats.
-- The live server (dcvmu.com) is Rich's. **Do not connect any test build to
-  it.** All online testing uses a local lobby server until Aisling says
-  otherwise.
+- The live server (dcvmu.com) is Rich's. He agreed to Wii U consoles on
+  it (Aisling, 2026-11-08). **Test builds still never connect to it**:
+  online testing uses a local lobby server unless Aisling asks for a live
+  run.
 
 ### 1.2 Big-endian and PowerPC gotchas (check all of these)
 
@@ -357,8 +358,9 @@ hardware checkpoint.
 
 **Done when:** `test_online.sh` passes on the host build; the Wii U build
 connects to the local server in Cemu or on console. Tag `m6`.
-**Cross-play against real Dreamcasts on dcvmu.com happens only after
-Aisling has agreed it with Rich.**
+Cross-play against real Dreamcasts on dcvmu.com: **agreed with Rich**
+(Aisling, 2026-11-08). Release builds connect there by default; the first
+live race is one Aisling plays.
 
 ### M7. Polish and release
 
@@ -399,8 +401,12 @@ At tags `m3`, `m5`, `m6`, `m7`:
   messages. Tag at each milestone's end.
 - Never push to any remote other than `origin` (hiraethclub/DreamKartsU),
   never force-push `main`.
-- Never connect any build to dcvmu.com or any server other than one
-  started locally by the test scripts.
+- Rich agreed to Wii U consoles on his live server, dcvmu.com (Aisling,
+  2026-11-08), so release builds use it, as the Dreamcast does. Test and
+  autotest builds still never connect to it, nor to any server other than
+  one started locally by the test scripts, unless Aisling asks for a live
+  run. It is Rich's server: no load testing, and test clients are named
+  `AT...` so his alerts skip them.
 - Never run `sudo`. If a package is missing, write the exact install
   command in the progress log under **Needs Aisling** and continue with
   something else.
@@ -879,3 +885,8 @@ At tags `m3`, `m5`, `m6`, `m7`:
     xfcheck, `test_native.sh`, `test_be.sh`, `test_saves.sh`,
     `test_wiiu.sh` (Cemu). Rich's lobby server and `dk-bot` build here with
     Go 1.24 and no downloads, for M6.
+- 2026-11-08: **Rich agreed to Wii U consoles on his server** (Aisling:
+  "He has given express permission"). Rules changed (CLAUDE.md, section 5):
+  release builds use dcvmu.com by default as upstream does (`server.txt`
+  still overrides); test builds keep 127.0.0.1 and refuse the live server
+  unless built with `DK_AT_LIVE`.

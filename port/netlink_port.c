@@ -1,11 +1,13 @@
 /* DKU: replaces upstream src/netlink.c. The console's network is up before
    the game starts, so there is no adapter or modem to bring up: the link
    only resolves the lobby server's name on a worker thread.
-
    The server comes from DK_NET_TEST_HOST at build time, else the first
-   line of server.txt in the save folder, else 127.0.0.1. Until Aisling has
-   agreed cross-play with Rich (PORT_PLAN.md M6), the live server is
-   refused: any name containing "dcvmu" and upstream's fallback address. */
+   line of server.txt in the save folder, else upstream's own: DK_NET_HOST
+   (dcvmu.com, Rich's server), with its fallback address if DNS fails.
+   Rich agreed to Wii U consoles on his server (Aisling, 2026-11-08). Test
+   builds (DK_AUTOTEST) never default to it: they use 127.0.0.1 and refuse
+   the live server unless built with DK_AT_LIVE, so an automated run
+   cannot land on Rich's server by accident. */
 #include "netlink.h"
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -15,7 +17,7 @@
 
 #include "plat.h"
 
-#define DKU_BLOCKED_IP "143.110.224.215"   /* upstream DK_NET_FALLBACK_IP, dcvmu.com */
+#define DKU_BLOCKED_IP DK_NET_FALLBACK_IP   /* dcvmu.com, refused by test builds */
 
 static volatile int stage = LINK_OFF;
 static volatile int worker_running;
@@ -29,7 +31,11 @@ static void pick_host(void) {
 #ifdef DK_NET_TEST_HOST
     snprintf(host, sizeof(host), "%s", DK_NET_STR(DK_NET_TEST_HOST));
 #else
+#if defined(DK_AUTOTEST) && !defined(DK_AT_LIVE)
     snprintf(host, sizeof(host), "127.0.0.1");
+#else
+    snprintf(host, sizeof(host), "%s", DK_NET_HOST);
+#endif
     char path[512];
     snprintf(path, sizeof(path), "%sserver.txt", plat_save_dir());
     FILE *f = fopen(path, "r");
@@ -44,11 +50,17 @@ static void pick_host(void) {
 #endif
 }
 
+#if defined(DK_AUTOTEST) && !defined(DK_AT_LIVE)
 static bool blocked_name(const char *h) {
     for(const char *p = h; *p; p++)
         if(strncasecmp(p, "dcvmu", 5) == 0) return true;
     return false;
 }
+static bool blocked_ip(uint32_t ip) { return ip == inet_addr(DKU_BLOCKED_IP); }
+#else
+static bool blocked_name(const char *h) { return (void)h, false; }
+static bool blocked_ip(uint32_t ip) { return (void)ip, false; }
+#endif
 
 static void *link_worker(void *unused) {
     (void)unused;
@@ -56,7 +68,7 @@ static void *link_worker(void *unused) {
     pick_host();
     server_ip = 0;
     if(blocked_name(host)) {
-        failure = "LIVE SERVER DISABLED IN THIS BUILD";
+        failure = "LIVE SERVER DISABLED IN TEST BUILDS";
         goto failed;
     }
     struct addrinfo hints, *res = NULL;
@@ -67,13 +79,17 @@ static void *link_worker(void *unused) {
         server_ip = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
         freeaddrinfo(res);
     }
+    /* As upstream: the live server's known address when its name will not
+       resolve. */
+    if(!server_ip && strcmp(host, DK_NET_HOST) == 0 && !blocked_ip(inet_addr(DK_NET_FALLBACK_IP)))
+        server_ip = inet_addr(DK_NET_FALLBACK_IP);
     if(!server_ip) {
         failure = "SERVER NOT FOUND";
         goto failed;
     }
-    if(server_ip == inet_addr(DKU_BLOCKED_IP)) {
+    if(blocked_ip(server_ip)) {
         server_ip = 0;
-        failure = "LIVE SERVER DISABLED IN THIS BUILD";
+        failure = "LIVE SERVER DISABLED IN TEST BUILDS";
         goto failed;
     }
     struct in_addr a = {.s_addr = server_ip};

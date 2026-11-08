@@ -10,8 +10,12 @@ milestones and the progress log are in `PORT_PLAN.md`.
   messages. Tag at each milestone's end.
 - Never push to any remote other than `origin` (hiraethclub/DreamKartsU),
   never force-push `main`.
-- Never connect any build to dcvmu.com or any server other than one
-  started locally by the test scripts.
+- Rich agreed to Wii U consoles on his live server, dcvmu.com (Aisling,
+  2026-11-08), so release builds use it, as the Dreamcast does. Test and
+  autotest builds still never connect to it, nor to any server other than
+  one started locally by the test scripts, unless Aisling asks for a live
+  run. It is Rich's server: no load testing, and test clients are named
+  `AT...` so his alerts skip them.
 - Never run `sudo`. If a package is missing, write the exact install
   command in the progress log under **Needs Aisling** and continue with
   something else.
