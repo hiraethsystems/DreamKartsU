@@ -468,8 +468,9 @@ At tags `m3`, `m5`, `m6`, `m7`:
 - **M6 on the console (2026-11-08):** a USB keyboard in the Wii U's USB
   port should type in the chat (X in a lobby) and on the name screen;
   untried, as no keyboard is attached here. Assumed to work like the
-  GamePad's on-screen keys until tried. And the first live race on
-  dcvmu.com with a release build: Aisling's to play (`TESTING.md` m6).
+  GamePad's on-screen keys until tried. ~~First live race~~: Aisling
+  raced Rich on dcvmu.com with build 27, "it worked perfectly"
+  (2026-11-08).
 - **M3 hardware test (2026-11-04):** the m3 builds are ready to try on
   the console. What to check and where to write results: `TESTING.md`.
 
@@ -931,3 +932,6 @@ At tags `m3`, `m5`, `m6`, `m7`:
     straight into the KOS-style queue), untried on hardware (Needs
     Aisling). Without one, upstream's on-screen keys type, so `nn_swkbd` is
     dropped. The PC keyboard moves to M7: it also drives pad 0.
+- 2026-11-08: **First live cross-play race**: Aisling's Wii U (build 27,
+  release) against Rich on dcvmu.com, "it worked perfectly". USB keyboard
+  still untried.

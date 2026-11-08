@@ -181,4 +181,5 @@ None of these use Rich's server. What only you can do:
 
 ### Results
 
-(write here)
+- 2026-11-08, build 27 (Aisling): raced Rich on dcvmu.com, "it worked
+  perfectly". USB keyboard: not tried yet.
