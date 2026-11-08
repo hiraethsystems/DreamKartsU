@@ -13,6 +13,8 @@ BACKEND ?= null
 CROSS ?=
 DK_AT_TRACK ?=
 EXTRA_CFLAGS ?=
+# TAG=name: a build folder of its own, for builds with other EXTRA_CFLAGS.
+TAG ?=
 
 CC := $(CROSS)gcc
 include sources.mk
@@ -28,7 +30,7 @@ else
 $(error BACKEND must be null or gl)
 endif
 
-CFG := $(CROSS)host-$(BACKEND)-$(VARIANT)$(NATIVE_TAG)$(if $(DK_AT_TRACK),-t$(DK_AT_TRACK))
+CFG := $(CROSS)host-$(BACKEND)-$(VARIANT)$(NATIVE_TAG)$(if $(DK_AT_TRACK),-t$(DK_AT_TRACK))$(if $(TAG),-$(TAG))
 OUT := build/$(CFG)
 BIN := $(OUT)/dreamkartsu
 

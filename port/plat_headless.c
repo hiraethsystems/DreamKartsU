@@ -27,6 +27,8 @@ static uint64_t frames, frame_real0, max_frames, repro_calls;
 static bool repro;
 static char save_dir[512];
 
+static bool realtime;
+
 static uint64_t real_us(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -59,6 +61,8 @@ void plat_init(void) {
     max_frames = mf ? strtoull(mf, NULL, 10) : 0;
     const char *r = getenv("DKU_REPRO");
     repro = r && *r && *r != '0';
+    const char *rt = getenv("DKU_REALTIME");
+    realtime = rt && *rt && *rt != '0';
     if(!frame_real0) frame_real0 = real_us();
 }
 
@@ -66,6 +70,17 @@ void plat_frame_done(void) {
     static int16_t out[2 * AUDIO_MIX_RATE / 60];
     audio_mix(out, AUDIO_MIX_RATE / 60);
     frames++;
+    /* DKU_REALTIME=1: one frame per 1/60 s of real time, for online play
+       against a server that keeps real time (tools/test_online.sh). */
+    if(realtime) {
+        static uint64_t start;
+        if(!start) start = real_us();
+        uint64_t due = start + frames * PERIOD_US, now = real_us();
+        if(due > now) {
+            struct timespec ts = {(time_t)((due - now) / 1000000u), (long)((due - now) % 1000000u) * 1000};
+            nanosleep(&ts, NULL);
+        }
+    }
     repro_calls = 0;
     frame_real0 = real_us();
 }
